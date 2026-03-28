@@ -107,9 +107,9 @@ pub async fn update_tray(
     let menu = menu_builder.build().map_err(|e| e.to_string())?;
 
     let tooltip = if active_count > 0 {
-        format!("Media Forge · 监听中 ({}/{})", active_count, total)
+        format!("媒体工坊 · 监听中 ({}/{})", active_count, total)
     } else {
-        "Media Forge".to_string()
+        "媒体工坊".to_string()
     };
 
     let title = if active_count > 0 {

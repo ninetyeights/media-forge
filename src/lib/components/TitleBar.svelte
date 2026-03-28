@@ -19,7 +19,7 @@
 <!-- macOS uses native Overlay titlebar, no custom bar needed -->
 {#if !isMacOS}
   <div class="titlebar" data-tauri-drag-region>
-    <span class="titlebar-title" data-tauri-drag-region>Media Forge</span>
+    <span class="titlebar-title" data-tauri-drag-region>媒体工坊</span>
     <div class="win-buttons">
       <button class="win-btn" onclick={() => appWindow.minimize()} aria-label="最小化">
         <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor"/></svg>

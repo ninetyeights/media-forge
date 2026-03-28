@@ -154,7 +154,7 @@
     <div class="setting-row">
       <div class="setting-info">
         <span class="setting-label">开机自启</span>
-        <span class="setting-desc">系统登录时自动启动 Media Forge</span>
+        <span class="setting-desc">系统登录时自动启动 媒体工坊</span>
       </div>
       <label class="toggle">
         <input type="checkbox" checked={autoStartEnabled} onchange={toggleAutoStart} />
@@ -169,7 +169,7 @@
     <div class="setting-row">
       <div class="setting-info">
         <span class="setting-label">版本</span>
-        <span class="setting-desc">Media Forge v{appVersion}</span>
+        <span class="setting-desc">媒体工坊 v{appVersion}</span>
       </div>
       <div class="setting-control">
         {#if updateStatus === "idle" || updateStatus === "none" || updateStatus === "error"}

@@ -76,8 +76,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Media Forge ${{ github.ref_name }}'
-          releaseBody: 'See the assets below to download for your platform.'
+          releaseName: '媒体工坊 ${{ github.ref_name }}'
+          releaseBody: '下载对应平台的安装包。'
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
