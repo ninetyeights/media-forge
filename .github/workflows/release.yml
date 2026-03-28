@@ -68,6 +68,16 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      - name: Extract changelog
+        id: changelog
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          BODY=$(awk "/^## v${VERSION}$/,/^## v/" CHANGELOG.md | head -n -1 | tail -n +2)
+          echo "body<<CHANGELOG_EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "CHANGELOG_EOF" >> $GITHUB_OUTPUT
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -77,7 +87,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: '媒体工坊 ${{ github.ref_name }}'
-          releaseBody: '下载对应平台的安装包。'
+          releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
