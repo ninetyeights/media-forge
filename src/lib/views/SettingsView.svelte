@@ -40,6 +40,7 @@
   async function checkForUpdate() {
     updateStatus = "checking";
     updateError = "";
+
     try {
       const update = await check();
       if (update) {
@@ -49,7 +50,14 @@
         updateStatus = "none";
       }
     } catch (e) {
-      updateError = String(e);
+      const msg = String(e);
+      if (msg.includes("fallback platforms")) {
+        updateError = "当前平台暂无可用更新包";
+      } else if (msg.includes("fetch") || msg.includes("network") || msg.includes("reiease")) {
+        updateError = "无法连接更新服务器，请检查网络";
+      } else {
+        updateError = msg;
+      }
       updateStatus = "error";
     }
   }
@@ -401,7 +409,7 @@
     color: var(--color-bg-primary);
     font-weight: 600;
   }
-  .update-btn-accent:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); }
+  .update-btn-accent:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); color: var(--color-bg-primary); }
 
   .update-text {
     font-size: 11px;
