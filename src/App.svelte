@@ -8,7 +8,6 @@
   import AudioView from "$lib/views/AudioView.svelte";
   import WatermarkView from "$lib/views/WatermarkView.svelte";
   import WatcherView from "$lib/views/WatcherView.svelte";
-  import HistoryView from "$lib/views/HistoryView.svelte";
   import SettingsView from "$lib/views/SettingsView.svelte";
 </script>
 
@@ -27,8 +26,6 @@
         <WatermarkView />
       {:else if $currentView === "watcher"}
         <WatcherView />
-      {:else if $currentView === "history"}
-        <HistoryView />
       {:else if $currentView === "settings"}
         <SettingsView />
       {/if}

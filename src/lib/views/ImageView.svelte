@@ -229,10 +229,32 @@
         }
       }
 
+      // Compute resize settings once (used in both skip and normal paths)
+      const resizeSettings = (() => {
+        const mode = settings.resizeMode || "off";
+        if (mode === "max") {
+          const w = settings.resizeWidth;
+          const h = settings.resizeHeight;
+          return { resize_enabled: w !== null || h !== null, resize_width: w, resize_height: h };
+        }
+        if (mode === "percent") {
+          const pct = settings.resizePercent ?? 100;
+          if (pct < 100 && file.width && file.height) {
+            return {
+              resize_enabled: true,
+              resize_width: Math.round(file.width * pct / 100),
+              resize_height: Math.round(file.height * pct / 100),
+            };
+          }
+        }
+        return { resize_enabled: false, resize_width: null, resize_height: null };
+      })();
+
       // Skip compression if target size mode and file already fits
-      // But still handle extension rename (e.g. .jpeg → .jpg)
+      // But still handle extension rename and resize
       if (isTarget && file.originalSize <= targetBytes!) {
-        if (outputPath !== file.path) {
+        const needsWork = outputPath !== file.path || resizeSettings.resize_enabled;
+        if (needsWork) {
           await invoke("process_image", {
             fileId: file.id,
             filePath: file.path,
@@ -242,10 +264,8 @@
               quality: 100,
               convert_enabled: settings.outputFormat !== "original",
               output_format: settings.outputFormat,
-              resize_enabled: false,
-              resize_width: null,
-              resize_height: null,
-              keep_aspect_ratio: true,
+              ...resizeSettings,
+              keep_aspect_ratio: settings.keepAspectRatio,
               target_size: null,
             },
           });
@@ -253,29 +273,37 @@
             await invoke("delete_file", { path: file.path }).catch(() => {});
           }
         }
+        if (!needsWork) {
+          imageFiles.update((f) => {
+            f[i] = { ...f[i], status: "skipped", compressedSize: file.originalSize, ratio: 0, outputPath };
+            return [...f];
+          });
+          return;
+        }
+        // If resize was done, get the actual output size
+        const outSize = await invoke<{ file_size: number }>("get_image_info", { path: outputPath });
         imageFiles.update((f) => {
-          const renamed = outputPath !== file.path;
-          f[i] = { ...f[i], status: renamed ? "done" : "skipped", compressedSize: file.originalSize, ratio: 0, outputPath };
+          f[i] = { ...f[i], status: "done", progress: undefined, compressedSize: (outSize as any).file_size, ratio: 1 - (outSize as any).file_size / file.originalSize, outputPath };
           return [...f];
         });
         return;
       }
 
-      const result: ProcessResult = await invoke("process_image", {
-        fileId: file.id,
-        filePath: file.path,
-        outputPath,
-        settings: {
+      const invokeSettings = {
           compress_enabled: isQuality || isTarget,
           quality: isQuality ? settings.quality : 80,
           convert_enabled: settings.outputFormat !== "original",
           output_format: settings.outputFormat,
-          resize_enabled: settings.resizeWidth !== null || settings.resizeHeight !== null,
-          resize_width: settings.resizeWidth,
-          resize_height: settings.resizeHeight,
+          ...resizeSettings,
           keep_aspect_ratio: settings.keepAspectRatio,
           target_size: targetBytes,
-        },
+      };
+
+      const result: ProcessResult = await invoke("process_image", {
+        fileId: file.id,
+        filePath: file.path,
+        outputPath,
+        settings: invokeSettings,
       });
 
       // Overwrite mode: delete original if output path differs
@@ -755,6 +783,53 @@
             onchange={(e) => imageSettings.update((s) => ({ ...s, hideFiltered: (e.target as HTMLInputElement).checked }))} />
           隐藏
         </label>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="inline-group">
+        <span class="field-label">缩放</span>
+        <SegmentControl
+          options={[
+            { value: "off", label: "关" },
+            { value: "max", label: "最大尺寸" },
+            { value: "percent", label: "百分比" },
+          ]}
+          selected={$imageSettings.resizeMode}
+          onchange={(v) => imageSettings.update((s) => ({ ...s, resizeMode: v as "off" | "max" | "percent" }))}
+        />
+        {#if $imageSettings.resizeMode === "max"}
+          <input type="text" inputmode="decimal" class="num-input num-input-sm" placeholder="宽"
+            value={$imageSettings.resizeWidth ?? ""}
+            oninput={(e) => {
+              const raw = (e.target as HTMLInputElement).value;
+              const v = raw.replace(/[^\d]/g, "");
+              if (v !== raw) (e.target as HTMLInputElement).value = v;
+              if (v === "") { imageSettings.update((s) => ({ ...s, resizeWidth: null })); return; }
+              const n = parseInt(v);
+              if (!isNaN(n) && n > 0) imageSettings.update((s) => ({ ...s, resizeWidth: n }));
+            }}
+          />
+          <span class="x-sep">×</span>
+          <input type="text" inputmode="decimal" class="num-input num-input-sm" placeholder="高"
+            value={$imageSettings.resizeHeight ?? ""}
+            oninput={(e) => {
+              const raw = (e.target as HTMLInputElement).value;
+              const v = raw.replace(/[^\d]/g, "");
+              if (v !== raw) (e.target as HTMLInputElement).value = v;
+              if (v === "") { imageSettings.update((s) => ({ ...s, resizeHeight: null })); return; }
+              const n = parseInt(v);
+              if (!isNaN(n) && n > 0) imageSettings.update((s) => ({ ...s, resizeHeight: n }));
+            }}
+          />
+          <span class="field-hint">px</span>
+        {:else if $imageSettings.resizeMode === "percent"}
+          <input type="range" class="slider" min="10" max="100" step="5"
+            value={$imageSettings.resizePercent}
+            oninput={(e) => imageSettings.update((s) => ({ ...s, resizePercent: Number((e.target as HTMLInputElement).value) }))}
+          />
+          <span class="field-value">{$imageSettings.resizePercent}%</span>
+        {/if}
       </div>
 
       <div class="sep"></div>

@@ -60,6 +60,10 @@
     {file.name}
   </button>
 
+  {#if file.width && file.height}
+    <span class="file-dims">{file.width}×{file.height}</span>
+  {/if}
+
   <span class="file-size">
     {formatSize(file.originalSize)}
     {#if file.status === "done" && file.compressedSize !== undefined}
@@ -138,7 +142,7 @@
         <svg width="16" height="16" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.5"/></svg>
       </button>
 
-      {#if file.status === "done" && file.outputPath}
+      {#if file.status === "done" && file.outputPath && file.outputPath !== file.path}
         <div class="compare-container" style="--pos: {sliderValue}%">
           <div class="compare-wrap">
             <img src={imgSrc(file.path)} alt="original" class="compare-img" />
@@ -236,6 +240,13 @@
     outline: none;
   }
   .file-name-btn:hover { color: var(--color-accent); }
+
+  .file-dims {
+    font-size: 10px;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
 
   .file-size {
     color: var(--color-text-secondary);

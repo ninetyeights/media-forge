@@ -7,8 +7,10 @@ export interface ImageSettings {
   quality: number;
   targetSize: number;
   outputFormat: string;
+  resizeMode: "off" | "max" | "percent";
   resizeWidth: number | null;
   resizeHeight: number | null;
+  resizePercent: number;
   keepAspectRatio: boolean;
   minSize: number | null;
   maxSize: number | null;
@@ -68,8 +70,10 @@ const IMAGE_DEFAULTS: ImageSettings = {
   quality: 80,
   targetSize: 1,
   outputFormat: "original",
+  resizeMode: "off",
   resizeWidth: null,
   resizeHeight: null,
+  resizePercent: 100,
   keepAspectRatio: true,
   minSize: null,
   maxSize: null,

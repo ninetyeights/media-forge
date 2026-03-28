@@ -11,7 +11,6 @@
 
   const bottomItems: { id: ViewName; label: string; icon: string }[] = [
     { id: "watcher", label: "监听", icon: "watcher" },
-    { id: "history", label: "历史", icon: "history" },
     { id: "settings", label: "设置", icon: "settings" },
   ];
 </script>

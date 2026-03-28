@@ -6,7 +6,6 @@ export type ViewName =
   | "audio"
   | "watermark"
   | "watcher"
-  | "history"
   | "settings";
 
 export const currentView = writable<ViewName>("image");
