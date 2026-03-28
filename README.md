@@ -43,6 +43,11 @@
 - 🔄 自动更新
 - 💾 所有设置自动持久化
 
+### 💬 反馈
+- 📝 应用内反馈表单（Bug 报告、功能建议）
+- 📸 截图支持粘贴 / 拖拽 / 多选（最多 3 张）
+- 📤 数据提交到 Google Sheets，截图上传到 Google Drive
+
 ### 🎨 界面
 - 🪟 macOS 毛玻璃 / Windows Mica 效果
 - 🌙 暗色主题（Catppuccin 风格配色）

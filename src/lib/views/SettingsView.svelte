@@ -4,12 +4,32 @@
   import { check } from "@tauri-apps/plugin-updater";
   import { relaunch } from "@tauri-apps/plugin-process";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { readFile } from "@tauri-apps/plugin-fs";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getVersion } from "@tauri-apps/api/app";
   import { onMount } from "svelte";
   import SegmentControl from "$lib/components/SegmentControl.svelte";
 
+  const FEEDBACK_URL = "https://script.google.com/macros/s/AKfycbzbDbtsIFLSQqIbvxb4RN_s3rbNpKALkCxmGYPCpsoLPCFWAlw8vC5rEMBIpUmEFis_rg/exec";
+
   let autoStartEnabled = $state(false);
   let appVersion = $state("");
+
+  // Feedback state
+  let showFeedback = $state(false);
+  let fbType = $state("bug");
+  let fbDesc = $state("");
+  let fbName = $state("");
+  let fbContact = $state("");
+  interface FbImage {
+    base64: string;
+    name: string;
+    type: string;
+  }
+  let fbImages = $state<FbImage[]>([]);
+  let fbSubmitting = $state(false);
+  let fbResult = $state<"idle" | "success" | "error">("idle");
+  let fbError = $state("");
   let updateStatus = $state<"idle" | "checking" | "available" | "downloading" | "ready" | "none" | "error">("idle");
   let updateVersion = $state("");
   let updateError = $state("");
@@ -75,6 +95,128 @@
       updateError = String(e);
       updateStatus = "error";
     }
+  }
+
+  const mimeMap: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+
+  async function pickScreenshot() {
+    const paths = await open({
+      multiple: true,
+      filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
+    });
+    if (!paths) return;
+    const list = Array.isArray(paths) ? paths : [paths];
+    for (const p of list) {
+      await addImageFromPath(p);
+    }
+  }
+
+  const MAX_IMAGES = 3;
+
+  async function addImageFromPath(path: string) {
+    if (fbImages.length >= MAX_IMAGES) return;
+    const data = await readFile(path);
+    const base64 = arrayToBase64(data);
+    const ext = path.split(".").pop()?.toLowerCase() || "png";
+    fbImages = [...fbImages, {
+      base64,
+      name: path.split(/[/\\]/).pop() || "screenshot.png",
+      type: mimeMap[ext] || "image/png",
+    }];
+  }
+
+  function arrayToBase64(arr: Uint8Array): string {
+    let binary = "";
+    const chunk = 8192;
+    for (let i = 0; i < arr.length; i += chunk) {
+      binary += String.fromCharCode(...arr.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  }
+
+  let dropUnlisten: (() => void) | null = null;
+
+  async function handlePaste(e: ClipboardEvent) {
+    if (!showFeedback || fbType !== "bug") return;
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith("image/") && fbImages.length < MAX_IMAGES) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        const buf = await blob.arrayBuffer();
+        const base64 = arrayToBase64(new Uint8Array(buf));
+        const ext = blob.type.split("/")[1] || "png";
+        fbImages = [...fbImages, { base64, name: `粘贴图片.${ext}`, type: blob.type }];
+      }
+    }
+  }
+
+  async function startDropListener() {
+    const unlisten = await getCurrentWindow().onDragDropEvent((event) => {
+      if (!showFeedback || fbType !== "bug") return;
+      if (event.payload.type === "drop") {
+        const paths = event.payload.paths.filter((p: string) => {
+          const ext = p.split(".").pop()?.toLowerCase() || "";
+          return ["png", "jpg", "jpeg", "gif", "webp"].includes(ext);
+        });
+        for (const p of paths) {
+          if (fbImages.length < MAX_IMAGES) addImageFromPath(p);
+        }
+      }
+    });
+    dropUnlisten = unlisten;
+  }
+
+  function stopDropListener() {
+    dropUnlisten?.();
+    dropUnlisten = null;
+  }
+
+  function removeImage(index: number) {
+    fbImages = fbImages.filter((_, i) => i !== index);
+  }
+
+  async function submitFeedback() {
+    if (!fbDesc.trim()) return;
+    fbSubmitting = true;
+    fbResult = "idle";
+    fbError = "";
+    try {
+      const body: Record<string, unknown> = {
+        type: fbType === "bug" ? "Bug" : fbType === "feature" ? "功能建议" : "其他",
+        description: fbDesc,
+        name: fbName,
+        contact: fbContact,
+        images: fbImages.map((img) => ({ base64: img.base64, name: img.name, type: img.type })),
+      };
+      const resp = await fetch(FEEDBACK_URL, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      if (resp.ok) {
+        fbResult = "success";
+        fbDesc = "";
+        fbName = "";
+        fbContact = "";
+        fbImages = [];
+      } else {
+        fbResult = "error";
+        fbError = "提交失败，请稍后重试";
+      }
+    } catch (e) {
+      fbResult = "error";
+      fbError = "网络错误，请检查连接";
+    }
+    fbSubmitting = false;
+  }
+
+  function closeFeedback() {
+    showFeedback = false;
+    fbResult = "idle";
+    stopDropListener();
+    document.removeEventListener("paste", handlePaste);
   }
 
   async function pickOutputDir(key: "defaultImageOutputDir" | "defaultVideoOutputDir" | "defaultAudioOutputDir") {
@@ -225,8 +367,108 @@
         <span class="update-error">{updateError}</span>
       </div>
     {/if}
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <span class="setting-label">反馈</span>
+        <span class="setting-desc">报告问题或提出功能建议</span>
+      </div>
+      <button class="update-btn" onclick={() => { showFeedback = true; fbResult = "idle"; startDropListener(); document.addEventListener("paste", handlePaste); }}>
+        提交反馈
+      </button>
+    </div>
   </div>
 </div>
+
+<!-- Feedback modal -->
+{#if showFeedback}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="fb-overlay" onclick={closeFeedback}>
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="fb-modal" onclick={(e) => e.stopPropagation()}>
+      <div class="fb-header">
+        <span class="fb-title">提交反馈</span>
+        <button class="fb-close" onclick={closeFeedback}>
+          <svg width="14" height="14" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.5"/></svg>
+        </button>
+      </div>
+
+      {#if fbResult === "success"}
+        <div class="fb-success">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/>
+          </svg>
+          <span>感谢你的反馈！</span>
+          <button class="update-btn" onclick={closeFeedback}>关闭</button>
+        </div>
+      {:else}
+        <div class="fb-body">
+          <div class="fb-field">
+            <span class="fb-label">类型</span>
+            <SegmentControl
+              options={[
+                { value: "bug", label: "Bug" },
+                { value: "feature", label: "功能建议" },
+                { value: "other", label: "其他" },
+              ]}
+              selected={fbType}
+              onchange={(v) => { fbType = v; if (v !== "bug") fbImages = []; }}
+            />
+          </div>
+
+          <div class="fb-field">
+            <span class="fb-label">描述</span>
+            <textarea class="fb-textarea" rows="4" placeholder="请详细描述你遇到的问题或想要的功能..." bind:value={fbDesc}></textarea>
+          </div>
+
+          {#if fbType === "bug"}
+          <div class="fb-field">
+            <span class="fb-label">截图（可选，支持粘贴/拖拽/选择，最多 {MAX_IMAGES} 张）</span>
+            <div class="fb-drop-zone">
+              {#if fbImages.length > 0}
+                <div class="fb-thumbs">
+                  {#each fbImages as img, i}
+                    <div class="fb-thumb">
+                      <img src="data:{img.type};base64,{img.base64}" alt={img.name} class="fb-thumb-img" />
+                      <button class="fb-thumb-remove" onclick={() => removeImage(i)}>
+                        <svg width="8" height="8" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.5"/></svg>
+                      </button>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+              <div class="fb-drop-hint">
+                <button class="update-btn" onclick={pickScreenshot}>选择图片</button>
+                <span class="fb-drop-text">或拖拽 / Ctrl+V 粘贴</span>
+              </div>
+            </div>
+          </div>
+          {/if}
+
+          <div class="fb-field">
+            <span class="fb-label">联系人（可选）</span>
+            <input class="fb-input" type="text" placeholder="你的名字或昵称" bind:value={fbName} />
+          </div>
+
+          <div class="fb-field">
+            <span class="fb-label">联系方式（可选）</span>
+            <input class="fb-input" type="text" placeholder="邮箱或其他联系方式，方便我们回复你" bind:value={fbContact} />
+          </div>
+
+          {#if fbResult === "error"}
+            <span class="fb-error">{fbError}</span>
+          {/if}
+
+          <button class="fb-submit" onclick={submitFeedback} disabled={fbSubmitting || !fbDesc.trim()}>
+            {fbSubmitting ? "提交中..." : "提交"}
+          </button>
+        </div>
+      {/if}
+    </div>
+  </div>
+{/if}
 
 <style>
   .view {
@@ -420,5 +662,201 @@
     font-size: 10px;
     color: var(--color-error);
     word-break: break-all;
+  }
+  /* Feedback modal */
+  .fb-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+
+  .fb-modal {
+    width: 420px;
+    max-height: 85vh;
+    background: var(--color-bg-secondary);
+    border: 0.5px solid var(--color-border);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .fb-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 0.5px solid var(--color-border);
+  }
+
+  .fb-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  .fb-close {
+    border: none;
+    background: transparent;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    outline: none;
+    display: flex;
+    align-items: center;
+    transition: color 0.15s;
+  }
+  .fb-close:hover { color: var(--color-text-primary); }
+
+  .fb-body {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .fb-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .fb-label {
+    font-size: 11px;
+    color: var(--color-text-muted);
+    font-weight: 500;
+  }
+
+  .fb-textarea {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--color-bg-surface);
+    border: 0.5px solid var(--color-border);
+    border-radius: 5px;
+    color: var(--color-text-primary);
+    font-size: 12px;
+    font-family: inherit;
+    resize: vertical;
+    outline: none;
+    min-height: 80px;
+  }
+  .fb-textarea:focus { border-color: var(--color-accent); }
+  .fb-textarea::placeholder { color: var(--color-text-muted); }
+
+  .fb-input {
+    width: 100%;
+    padding: 6px 10px;
+    background: var(--color-bg-surface);
+    border: 0.5px solid var(--color-border);
+    border-radius: 5px;
+    color: var(--color-text-primary);
+    font-size: 12px;
+    outline: none;
+  }
+  .fb-input:focus { border-color: var(--color-accent); }
+  .fb-input::placeholder { color: var(--color-text-muted); }
+
+  .fb-drop-zone {
+    border: 1.5px dashed var(--color-border);
+    border-radius: 6px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: border-color 0.15s;
+    outline: none;
+  }
+  .fb-drop-zone:focus, .fb-drop-zone:hover { border-color: var(--color-accent); }
+
+  .fb-drop-hint {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .fb-drop-text {
+    font-size: 10px;
+    color: var(--color-text-muted);
+  }
+
+  .fb-thumbs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .fb-thumb {
+    position: relative;
+    width: 60px;
+    height: 60px;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 0.5px solid var(--color-border);
+  }
+
+  .fb-thumb-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .fb-thumb-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 16px;
+    height: 16px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    outline: none;
+    transition: background 0.15s;
+  }
+  .fb-thumb-remove:hover { background: var(--color-error); }
+
+  .fb-submit {
+    padding: 7px 0;
+    background: var(--color-accent);
+    color: var(--color-bg-primary);
+    border: none;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    outline: none;
+  }
+  .fb-submit:hover:not(:disabled) { background: var(--color-accent-hover); }
+  .fb-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .fb-error {
+    font-size: 11px;
+    color: var(--color-error);
+  }
+
+  .fb-success {
+    padding: 32px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    color: var(--color-success);
+    font-size: 14px;
+    font-weight: 500;
   }
 </style>
