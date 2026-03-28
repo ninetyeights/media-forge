@@ -73,7 +73,7 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          BODY=$(awk "/^## v${VERSION}$/,/^## v/" CHANGELOG.md | head -n -1 | tail -n +2)
+          BODY=$(awk "/^## v${VERSION}$/{found=1; next} /^## v/{if(found) exit} found" CHANGELOG.md)
           echo "body<<CHANGELOG_EOF" >> $GITHUB_OUTPUT
           echo "$BODY" >> $GITHUB_OUTPUT
           echo "CHANGELOG_EOF" >> $GITHUB_OUTPUT
