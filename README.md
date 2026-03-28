@@ -109,4 +109,4 @@ git push origin v0.2.0
 
 ## 📄 许可证
 
-MIT
+GPL-3.0
