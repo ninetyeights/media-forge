@@ -118,7 +118,7 @@ export interface AppSettings {
 const APP_DEFAULTS: AppSettings = {
   sizeBase: 1024,
   concurrency: 4,
-  notificationsEnabled: true,
+  notificationsEnabled: false,
   autoStart: false,
   defaultImageOutputDir: "",
   defaultVideoOutputDir: "",
