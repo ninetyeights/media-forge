@@ -10,3 +10,4 @@ export type ViewName =
   | "settings";
 
 export const currentView = writable<ViewName>("image");
+export const hasUpdate = writable(false);

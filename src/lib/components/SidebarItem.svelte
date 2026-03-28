@@ -4,13 +4,15 @@
     label: string;
     active: boolean;
     onClick: () => void;
+    badge?: boolean;
   }
 
-  let { icon, label, active, onClick }: Props = $props();
+  let { icon, label, active, onClick, badge = false }: Props = $props();
 </script>
 
 <button class="item" class:active onclick={onClick}>
   <span class="icon">
+    {#if badge}<span class="badge-dot"></span>{/if}
     {#if icon === "image"}
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <rect x="3" y="3" width="18" height="18" rx="2"/>
@@ -83,6 +85,17 @@
     align-items: center;
     justify-content: center;
     height: 20px;
+    position: relative;
+  }
+
+  .badge-dot {
+    position: absolute;
+    top: -2px;
+    right: -4px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--color-error);
   }
 
   .label {

@@ -8,6 +8,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getVersion } from "@tauri-apps/api/app";
   import { onMount } from "svelte";
+  import { hasUpdate } from "$lib/stores/navigation";
   import SegmentControl from "$lib/components/SegmentControl.svelte";
 
   const FEEDBACK_URL = "https://script.google.com/macros/s/AKfycbzbDbtsIFLSQqIbvxb4RN_s3rbNpKALkCxmGYPCpsoLPCFWAlw8vC5rEMBIpUmEFis_rg/exec";
@@ -84,6 +85,7 @@
 
   async function downloadAndInstall() {
     updateStatus = "downloading";
+    hasUpdate.set(false);
     try {
       const update = await check();
       if (update) {
@@ -341,8 +343,11 @@
 
     <div class="setting-row">
       <div class="setting-info">
-        <span class="setting-label">版本</span>
-        <span class="setting-desc">媒体工坊 v{appVersion}</span>
+        <span class="setting-label">
+          版本
+          {#if $hasUpdate}<span class="update-dot"></span>{/if}
+        </span>
+        <span class="setting-desc">媒体工坊 v{appVersion}{$hasUpdate ? " · 有新版本可用" : ""}</span>
       </div>
       <div class="setting-control">
         {#if updateStatus === "idle" || updateStatus === "none" || updateStatus === "error"}
@@ -656,6 +661,16 @@
   .update-text {
     font-size: 11px;
     color: var(--color-text-muted);
+  }
+
+  .update-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-error);
+    margin-left: 4px;
+    vertical-align: middle;
   }
 
   .update-error {

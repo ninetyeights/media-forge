@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { currentView, type ViewName } from "$lib/stores/navigation";
+  import { currentView, hasUpdate, type ViewName } from "$lib/stores/navigation";
   import SidebarItem from "./SidebarItem.svelte";
 
   const mainItems: { id: ViewName; label: string; icon: string }[] = [
@@ -36,6 +36,7 @@
         icon={item.icon}
         label={item.label}
         active={$currentView === item.id}
+        badge={item.id === "settings" && $hasUpdate}
         onClick={() => currentView.set(item.id)}
       />
     {/each}
