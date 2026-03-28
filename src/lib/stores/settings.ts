@@ -113,6 +113,7 @@ export interface AppSettings {
   defaultImageOutputDir: string;
   defaultVideoOutputDir: string;
   defaultAudioOutputDir: string;
+  uiScale: number;
 }
 
 const APP_DEFAULTS: AppSettings = {
@@ -123,6 +124,7 @@ const APP_DEFAULTS: AppSettings = {
   defaultImageOutputDir: "",
   defaultVideoOutputDir: "",
   defaultAudioOutputDir: "",
+  uiScale: 100,
 };
 
 export const appSettings = writable<AppSettings>(APP_DEFAULTS);

@@ -158,9 +158,8 @@
     }
     if (f.autoProcess && f.mediaType === "image") {
       if (f.outputFormat === "png") {
-        if (f.pngMode === "off") parts.push("PNG 原图");
-        else if (f.pngMode === "lossy") parts.push(`PNG 有损 ${f.pngQuality}%`);
-        else parts.push("PNG 无损");
+        const q = f.pngQuality ?? 100;
+        parts.push(q === 100 ? "PNG 无损" : `PNG ${q}%`);
       } else {
         const p = getPreset(f.preset);
         parts.push(p.label);
@@ -395,14 +394,9 @@
       let resizeWidth: number | null = null;
 
       if (isPngOutput) {
-        const pngMode = folder?.pngMode ?? "lossless";
-        if (pngMode === "off") {
-          compressEnabled = false;
-          quality = 100;
-        } else {
-          compressEnabled = true;
-          quality = pngMode === "lossy" ? (folder?.pngQuality ?? 80) : 100;
-        }
+        const q = folder?.pngQuality ?? 100;
+        compressEnabled = true;
+        quality = q;
       } else if (preset) {
         const isQuality = !isTarget && preset.quality < 100;
         targetBytes = isTarget ? Math.round(preset.targetSize! * 1024 * 1024) : null;
@@ -421,6 +415,7 @@
       addIgnorePath(outputPath);
 
       const result: ProcessResult = await invoke("process_image", {
+        fileId: file.id,
         filePath: file.path, outputPath,
         settings: {
           compress_enabled: compressEnabled,
@@ -444,10 +439,8 @@
       // Build process info description
       const infoParts: string[] = [];
       if (isPngOutput) {
-        const pngMode = folder?.pngMode ?? "lossless";
-        if (pngMode === "off") infoParts.push("PNG 原图");
-        else if (pngMode === "lossy") infoParts.push(`PNG 有损 ${folder?.pngQuality ?? 80}%`);
-        else infoParts.push("PNG 无损");
+        const q = folder?.pngQuality ?? 100;
+        infoParts.push(q === 100 ? "PNG 无损" : `PNG ${q}%`);
       } else if (preset) {
         const isQuality = !isTarget && preset.quality < 100;
         if (isQuality) infoParts.push(`质量 ${preset.quality}%`);
@@ -679,22 +672,17 @@
           {#if folder.outputFormat === "png"}
             <div class="pop-row">
               <span class="pop-label">压缩</span>
-              <SegmentControl
-                options={[
-                  { value: "off", label: "原图" },
-                  { value: "lossless", label: "无损" },
-                  { value: "lossy", label: "有损" },
-                ]}
-                selected={folder.pngMode}
-                onchange={(v) => updateFolder(folder.id, { pngMode: v as "off" | "lossless" | "lossy" })}
+              <input type="range" class="pop-slider" min="1" max="100"
+                value={folder.pngQuality ?? 100}
+                oninput={(e) => {
+                  const q = Number((e.target as HTMLInputElement).value);
+                  updateFolder(folder.id, {
+                    pngQuality: q,
+                    pngMode: q === 100 ? "lossless" : "lossy",
+                  });
+                }}
               />
-              {#if folder.pngMode === "lossy"}
-                <input type="range" class="pop-slider" min="1" max="99"
-                  value={folder.pngQuality ?? 80}
-                  oninput={(e) => updateFolder(folder.id, { pngQuality: Number((e.target as HTMLInputElement).value) })}
-                />
-                <span class="pop-value">{folder.pngQuality ?? 80}%</span>
-              {/if}
+              <span class="pop-value">{(folder.pngQuality ?? 100) === 100 ? "无损" : `${folder.pngQuality}%`}</span>
             </div>
           {:else}
             <div class="pop-row">

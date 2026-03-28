@@ -25,6 +25,7 @@ pub fn process_image(
     file_path: &str,
     output_path: &str,
     settings: &ImageProcessSettings,
+    on_progress: &dyn Fn(u8, &str),
 ) -> Result<ProcessResult, String> {
     let total_start = std::time::Instant::now();
 
@@ -48,11 +49,15 @@ pub fn process_image(
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
+    on_progress(5, "分析中");
+
     if !needs_processing {
         println!("[process] FAST PATH: copy only, {:.0}KB", original_size as f64 / 1024.0);
+        on_progress(50, "复制文件");
         if file_path != output_path {
             std::fs::copy(file_path, output_path).map_err(|e| e.to_string())?;
         }
+        on_progress(100, "完成");
         println!("[process] total: {:?}", total_start.elapsed());
         return Ok(ProcessResult {
             output_path: output_path.to_string(),
@@ -66,6 +71,7 @@ pub fn process_image(
         source_format, target_format, settings.compress_enabled, settings.resize_enabled, original_size as f64 / 1024.0);
 
     // Decode
+    on_progress(10, "解码中");
     let t = std::time::Instant::now();
     let mut img = ImageReader::open(file_path)
         .map_err(|e| e.to_string())?
@@ -75,8 +81,11 @@ pub fn process_image(
         .map_err(|e| e.to_string())?;
     println!("[process] decode: {:?} ({}x{})", t.elapsed(), img.width(), img.height());
 
+    on_progress(30, "解码完成");
+
     // Resize
     if settings.resize_enabled {
+        on_progress(35, "缩放中");
         let t = std::time::Instant::now();
         img = resize_image(img, settings.resize_width, settings.resize_height, settings.keep_aspect_ratio);
         println!("[process] resize: {:?} → {}x{}", t.elapsed(), img.width(), img.height());
@@ -85,6 +94,7 @@ pub fn process_image(
     let quality = if settings.compress_enabled { settings.quality } else { 100 };
 
     // Encode
+    on_progress(45, "编码中");
     let compressed_size = if let Some(target_bytes) = settings.target_size {
         // Binary search: find highest quality that fits under target size (max ~7 iterations)
         let t = std::time::Instant::now();
@@ -101,7 +111,9 @@ pub fn process_image(
         size
     };
 
+    on_progress(95, "写入完成");
     println!("[process] TOTAL: {:?}", total_start.elapsed());
+    on_progress(100, "完成");
 
     let ratio = if original_size > 0 {
         1.0 - (compressed_size as f64 / original_size as f64)
@@ -397,33 +409,11 @@ fn compress_png_to_target_size(
         return Ok(lossless);
     }
 
-    // Binary search on imagequant quality
-    let mut low = 0u8;
-    let mut high = 100u8;
-    let mut best: Option<Vec<u8>> = None;
-
-    while low <= high {
-        let mid = (low + high) / 2;
-        match quantize_png(&rgba, width, height, mid) {
-            Ok(buf) => {
-                println!("[target-png] q={}: {:.0}KB (target: {:.0}KB)", mid, buf.len() as f64 / 1024.0, target_bytes as f64 / 1024.0);
-                if (buf.len() as u64) <= target_bytes {
-                    best = Some(buf);
-                    low = mid + 1; // try higher quality
-                } else {
-                    if mid == 0 { break; }
-                    high = mid - 1;
-                }
-            }
-            Err(e) => {
-                println!("[target-png] q={} failed: {}", mid, e);
-                if mid == 0 { break; }
-                high = mid - 1;
-            }
-        }
-    }
-
-    best.ok_or_else(|| "无法将 PNG 压缩到目标大小，图片可能太大，请尝试缩小尺寸".to_string())
+    // PNG is lossless — return lossless result even if it exceeds target
+    // to avoid destroying image quality with aggressive quantization
+    println!("[target-png] lossless {:.0}KB > target {:.0}KB, returning lossless (PNG 无损压缩无法达到目标大小)",
+        lossless.len() as f64 / 1024.0, target_bytes as f64 / 1024.0);
+    Ok(lossless)
 }
 
 /// Quantize PNG to indexed color using imagequant (pngquant algorithm), encode with image crate.

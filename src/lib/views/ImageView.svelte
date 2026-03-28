@@ -1,6 +1,8 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { listen } from "@tauri-apps/api/event";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { onMount, onDestroy } from "svelte";
   import { imageFiles, isProcessing, removeFile, clearFiles, sendToWatermark } from "$lib/stores/fileQueue";
   import { imageSettings, imagePresets, appSettings, type ImageSettings, type AppSettings } from "$lib/stores/settings";
   import { currentView } from "$lib/stores/navigation";
@@ -11,6 +13,32 @@
   import { formatSize } from "$lib/utils/fileSize";
   import { splitPath, joinPath, fileName as getFileName, parentDir, splitSegments, pathSep, stripLeadingSep } from "$lib/utils/path";
 
+  let progressUnlisten: (() => void) | null = null;
+
+  function handleGlobalClick(e: MouseEvent) {
+    if (showTip && !(e.target as HTMLElement).closest(".tip-btn")) {
+      showTip = null;
+    }
+  }
+
+  onMount(async () => {
+    document.addEventListener("click", handleGlobalClick);
+    progressUnlisten = await listen<{ fileId: string; progress: number; status: string }>(
+      "processing-progress",
+      (event) => {
+        const { fileId, progress } = event.payload;
+        imageFiles.update((files) =>
+          files.map((f) => f.id === fileId ? { ...f, progress } : f),
+        );
+      },
+    );
+  });
+
+  onDestroy(() => {
+    progressUnlisten?.();
+    document.removeEventListener("click", handleGlobalClick);
+  });
+
   async function pickOutputDir() {
     const dir = await open({ directory: true, multiple: false });
     if (dir) {
@@ -19,7 +47,6 @@
   }
 
   const imageExts = ["jpg", "jpeg", "png", "webp", "avif", "gif", "bmp", "tiff"];
-  const losslessFormats = new Set(["gif", "bmp", "tiff"]);
   const formatOptions = [
     { value: "original", label: "原格式" },
     { value: "webp", label: "WEBP" },
@@ -29,6 +56,7 @@
   ];
 
   let processing = $state(false);
+  let showTip = $state<string | null>(null);
 
   function applyPreset(presetId: string) {
     const p = imagePresets.find((x) => x.id === presetId);
@@ -184,16 +212,29 @@
 
     try {
       const outputPath = getOutputPath(file, settings);
-      const isLossless = settings.compressMode === "lossless";
       const isQuality = settings.compressMode === "quality";
       const isTarget = settings.compressMode === "target";
       const targetBytes = isTarget ? Math.round(settings.targetSize * 1024 * 1024) : null;
+
+      // Skip unsupported formats (GIF/BMP/TIFF) for lossy/target modes when keeping original format
+      const fileFormat = file.format?.toLowerCase() || "";
+      const unsupportedLossy = new Set(["gif", "bmp", "tiff"]);
+      if (settings.outputFormat === "original" && unsupportedLossy.has(fileFormat)) {
+        if (isTarget || (isQuality && settings.quality < 100)) {
+          imageFiles.update((f) => {
+            f[i] = { ...f[i], status: "skipped", progress: undefined, error: `${fileFormat.toUpperCase()} 不支持${isTarget ? "按大小" : "有损"}压缩，建议转为 JPG/WebP` };
+            return [...f];
+          });
+          return;
+        }
+      }
 
       // Skip compression if target size mode and file already fits
       // But still handle extension rename (e.g. .jpeg → .jpg)
       if (isTarget && file.originalSize <= targetBytes!) {
         if (outputPath !== file.path) {
           await invoke("process_image", {
+            fileId: file.id,
             filePath: file.path,
             outputPath,
             settings: {
@@ -221,11 +262,12 @@
       }
 
       const result: ProcessResult = await invoke("process_image", {
+        fileId: file.id,
         filePath: file.path,
         outputPath,
         settings: {
-          compress_enabled: isLossless || isQuality || isTarget,
-          quality: isQuality ? settings.quality : (isLossless ? 100 : 80),
+          compress_enabled: isQuality || isTarget,
+          quality: isQuality ? settings.quality : 80,
           convert_enabled: settings.outputFormat !== "original",
           output_format: settings.outputFormat,
           resize_enabled: settings.resizeWidth !== null || settings.resizeHeight !== null,
@@ -242,13 +284,16 @@
       }
 
       const noChange = result.compressed_size === result.original_size && result.ratio === 0 && result.output_path === file.path;
+      const missedTarget = isTarget && targetBytes !== null && result.compressed_size > targetBytes;
       imageFiles.update((f) => {
         f[i] = {
           ...f[i],
-          status: noChange ? "skipped" : "done",
+          status: noChange ? "skipped" : missedTarget ? "done" : "done",
+          progress: undefined,
           compressedSize: result.compressed_size,
           ratio: result.ratio,
           outputPath: result.output_path,
+          error: missedTarget ? `PNG 无损压缩无法达到 ≤${settings.targetSize}MB` : undefined,
         };
         return [...f];
       });
@@ -566,6 +611,7 @@
               {file}
               dimmed={skipped}
               selected={selectedIds.has(file.id)}
+
               onToggleSelect={() => toggleFileSelect(file.id)}
               onRemove={() => removeFile(imageFiles, index)}
               onReset={() => resetFile(index)}
@@ -589,64 +635,88 @@
     <!-- Row 1: add + format + compress + clear -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <FileDropZone onFilesSelected={handleFilesSelected} accept={imageExts} hint="" compact />
+        <span class="toolbar-group">
+          <FileDropZone onFilesSelected={handleFilesSelected} accept={imageExts} hint="" compact />
+        </span>
         <div class="toolbar-sep"></div>
-        <SegmentControl
-          options={formatOptions}
-          selected={$imageSettings.outputFormat}
-          onchange={(v) => imageSettings.update((s) => {
-            let mode = s.compressMode;
-            if (v === "png") {
-              // PNG doesn't support target size; map quality→quality (lossy), off→off
-              if (mode === "target") mode = "off";
-            } else {
-              // Non-PNG doesn't support lossless mode
-              if (mode === "lossless") mode = "off";
-            }
-            return { ...s, outputFormat: v, compressMode: mode };
-          })}
-        />
-        <div class="toolbar-sep"></div>
-        <SegmentControl
-          options={$imageSettings.outputFormat === "png"
-            ? [
-                { value: "off", label: "原图" },
-                { value: "lossless", label: "无损" },
-                { value: "quality", label: "有损" },
-              ]
-            : [
-                { value: "off", label: "原图质量" },
-                { value: "quality", label: "按质量" },
-                { value: "target", label: "按大小" },
-              ]
-          }
-          selected={$imageSettings.outputFormat === "png" && ($imageSettings.compressMode === "target") ? "off" : $imageSettings.compressMode}
-          onchange={(v) => imageSettings.update((s) => ({ ...s, compressMode: v as "off" | "quality" | "target" | "lossless" }))}
-        />
-        {#if $imageSettings.compressMode === "quality" && !losslessFormats.has($imageSettings.outputFormat)}
-          <input type="range" class="slider" min="1" max="99"
-            value={$imageSettings.quality}
-            oninput={(e) => manualUpdate((s) => ({ ...s, quality: Number((e.target as HTMLInputElement).value) }))}
+        <span class="toolbar-group">
+          <SegmentControl
+            options={formatOptions}
+            selected={$imageSettings.outputFormat}
+            onchange={(v) => imageSettings.update((s) => ({
+              ...s,
+              outputFormat: v,
+              compressMode: v === "png" && s.compressMode === "target" ? "off" : s.compressMode,
+              quality: v === "png" && s.outputFormat !== "png" ? 100 : (v !== "png" && s.outputFormat === "png" && s.quality === 100 ? 80 : s.quality),
+            }))}
           />
-          <span class="field-value">{$imageSettings.quality}%</span>
-        {:else if $imageSettings.compressMode === "target"}
-          <div class="target-size-group">
-            <span class="field-value">≤</span>
-            <input type="text" inputmode="decimal" class="num-input num-input-target" placeholder="1"
-              value={$imageSettings.targetSize}
-              oninput={(e) => {
-                const raw = (e.target as HTMLInputElement).value;
-                const v = raw.replace(/[^\d.]/g, "");
-                if (v !== raw) (e.target as HTMLInputElement).value = v;
-                if (v === "" || v === ".") return;
-                if (v.endsWith(".")) return;
-                const n = parseFloat(v);
-                if (!isNaN(n) && n > 0) imageSettings.update((s) => ({ ...s, targetSize: n }));
-              }}
+        </span>
+        <div class="toolbar-sep"></div>
+        <span class="toolbar-group">
+          <SegmentControl
+            options={$imageSettings.outputFormat === "png"
+              ? [
+                  { value: "off", label: "原图" },
+                  { value: "quality", label: "压缩" },
+                ]
+              : [
+                  { value: "off", label: "原图" },
+                  { value: "quality", label: "压缩" },
+                  { value: "target", label: "按大小" },
+                ]
+            }
+            selected={($imageSettings.outputFormat === "png" && $imageSettings.compressMode === "target") ? "off" : ($imageSettings.compressMode === "lossless" ? "quality" : $imageSettings.compressMode)}
+            onchange={(v) => imageSettings.update((s) => ({ ...s, compressMode: v as "off" | "quality" | "target" }))}
+          />
+          {#if $imageSettings.compressMode === "quality" || $imageSettings.compressMode === "lossless"}
+            <input type="range" class="slider" min="1" max="100"
+              value={$imageSettings.quality}
+              oninput={(e) => manualUpdate((s) => ({ ...s, quality: Number((e.target as HTMLInputElement).value) }))}
             />
-            <span class="field-label">MB</span>
-          </div>
-        {/if}
+            <span class="field-value">{$imageSettings.quality === 100 ? "无损" : `${$imageSettings.quality}%`}</span>
+            <button class="tip-btn" onclick={() => showTip = showTip === "quality" ? null : "quality"}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </button>
+            {#if showTip === "quality"}
+              <div class="tip-popover">
+                {#if $imageSettings.quality === 100}
+                  只减小文件体积，画质不变
+                {:else}
+                  数值越低文件越小，画质越低。GIF/BMP/TIFF 格式不支持有损压缩，将跳过
+                {/if}
+              </div>
+            {/if}
+          {:else if $imageSettings.compressMode === "target"}
+            <div class="target-size-group">
+              <span class="field-value">≤</span>
+              <input type="text" inputmode="decimal" class="num-input num-input-target" placeholder="1"
+                value={$imageSettings.targetSize}
+                oninput={(e) => {
+                  const raw = (e.target as HTMLInputElement).value;
+                  const v = raw.replace(/[^\d.]/g, "");
+                  if (v !== raw) (e.target as HTMLInputElement).value = v;
+                  if (v === "" || v === ".") return;
+                  if (v.endsWith(".")) return;
+                  const n = parseFloat(v);
+                  if (!isNaN(n) && n > 0) imageSettings.update((s) => ({ ...s, targetSize: n }));
+                }}
+              />
+              <span class="field-label">MB</span>
+            </div>
+            <button class="tip-btn" onclick={() => showTip = showTip === "target" ? null : "target"}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </button>
+            {#if showTip === "target"}
+              <div class="tip-popover">
+                自动搜索最优质量压缩到目标大小以内。PNG 可能无法达到目标大小。GIF/BMP/TIFF 格式不支持，将跳过
+              </div>
+            {/if}
+          {/if}
+        </span>
       </div>
       <button class="btn-text-danger" onclick={() => clearFiles(imageFiles)}>清空</button>
     </div>
@@ -836,6 +906,8 @@
     justify-content: space-between;
     padding: 4px 0;
     flex-shrink: 0;
+    flex-wrap: wrap;
+    gap: 4px;
   }
 
   .toolbar-left {
@@ -844,6 +916,15 @@
     gap: 8px;
     flex: 1;
     min-width: 0;
+    position: relative;
+    flex-wrap: wrap;
+  }
+
+  .toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
   }
 
   .toolbar-sep {
@@ -942,6 +1023,45 @@
     color: var(--color-text-muted);
     opacity: 0.6;
     flex-shrink: 0;
+  }
+
+  .tip-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border: none;
+    background: transparent;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    border-radius: 3px;
+    padding: 0;
+    flex-shrink: 0;
+    outline: none;
+    transition: all 0.15s;
+    position: relative;
+  }
+  .tip-btn:hover { color: var(--color-text-secondary); }
+
+  .tip-popover {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    padding: 6px 10px;
+    background: var(--color-bg-secondary);
+    border: 0.5px solid var(--color-border);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    white-space: normal;
+    width: 220px;
+    line-height: 1.5;
+    z-index: 50;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
   }
 
   .target-size-group {

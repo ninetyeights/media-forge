@@ -99,6 +99,24 @@
 
     <div class="setting-row">
       <div class="setting-info">
+        <span class="setting-label">界面缩放</span>
+        <span class="setting-desc">调整界面整体大小</span>
+      </div>
+      <SegmentControl
+        options={[
+          { value: "80", label: "80%" },
+          { value: "90", label: "90%" },
+          { value: "100", label: "100%" },
+          { value: "110", label: "110%" },
+          { value: "120", label: "120%" },
+        ]}
+        selected={String($appSettings.uiScale || 100)}
+        onchange={(v) => appSettings.update((s) => ({ ...s, uiScale: Number(v) }))}
+      />
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
         <span class="setting-label">文件大小单位</span>
         <span class="setting-desc">1024 与 Windows 一致，1000 与 macOS 一致</span>
       </div>
@@ -112,10 +130,15 @@
       />
     </div>
 
+  </div>
+
+  <div class="settings-group">
+    <span class="group-label">默认输出目录</span>
+
     {#each [
-      { key: "defaultImageOutputDir" as const, label: "图片默认输出目录" },
-      { key: "defaultVideoOutputDir" as const, label: "视频默认输出目录" },
-      { key: "defaultAudioOutputDir" as const, label: "音频默认输出目录" },
+      { key: "defaultImageOutputDir" as const, label: "图片" },
+      { key: "defaultVideoOutputDir" as const, label: "视频" },
+      { key: "defaultAudioOutputDir" as const, label: "音频" },
     ] as item}
       <div class="setting-row">
         <div class="setting-info">

@@ -41,7 +41,7 @@ export function createWatchFolder(path: string): WatchFolder {
     preset: "lossless",
     outputFormat: "original",
     pngMode: "lossless",
-    pngQuality: 80,
+    pngQuality: 100,
     outputDir: "",
     outputMode: "saveto",
     preserveStructure: true,
