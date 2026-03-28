@@ -40,7 +40,7 @@ function syncTray(): void {
   const folders = get(watchFolders);
 
   const trayFolders = folders.map((f) => ({
-    name: f.path.split("/").pop() || f.path,
+    name: f.path.split(/[/\\]/).pop() || f.path,
     path: f.path,
     media_type: f.mediaType,
     auto_process: f.autoProcess,

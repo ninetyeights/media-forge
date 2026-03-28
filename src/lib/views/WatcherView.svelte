@@ -9,6 +9,7 @@
   import { watchFolders, createWatchFolder, extsForType, loadWatchFolders, type WatchFolder } from "$lib/stores/watcher";
   import { imagePresets, appSettings, type ImagePreset } from "$lib/stores/settings";
   import { formatSize, formatRatio } from "$lib/utils/fileSize";
+  import { splitPath, joinPath, fileName as getFileName } from "$lib/utils/path";
   import SegmentControl from "$lib/components/SegmentControl.svelte";
   import type { ImageInfo, ProcessResult, MediaFile } from "$lib/types";
 
@@ -30,6 +31,17 @@
     const d = new Date(ts);
     const pad = (n: number) => String(n).padStart(2, "0");
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  function defaultDirForType(mt: string): string {
+    if (mt === "image") return $appSettings.defaultImageOutputDir;
+    if (mt === "video") return $appSettings.defaultVideoOutputDir;
+    return $appSettings.defaultAudioOutputDir;
+  }
+
+  function defaultDirLabel(mt: string): string {
+    const dir = defaultDirForType(mt);
+    return dir ? `默认: ${getFileName(dir)}` : "选择目录...";
   }
 
   function getPreset(presetId: string): ImagePreset {
@@ -145,9 +157,15 @@
       parts.push(f.fileExts.map((e) => `.${e}`).join(" "));
     }
     if (f.autoProcess && f.mediaType === "image") {
-      const p = getPreset(f.preset);
-      parts.push(p.label);
-      if (f.outputFormat !== "original") parts.push(formatLabels[f.outputFormat] || f.outputFormat);
+      if (f.outputFormat === "png") {
+        if (f.pngMode === "off") parts.push("PNG 原图");
+        else if (f.pngMode === "lossy") parts.push(`PNG 有损 ${f.pngQuality}%`);
+        else parts.push("PNG 无损");
+      } else {
+        const p = getPreset(f.preset);
+        parts.push(p.label);
+        if (f.outputFormat !== "original") parts.push(formatLabels[f.outputFormat] || f.outputFormat);
+      }
     }
     parts.push(f.outputMode === "saveto" ? "另存" : "覆盖");
     if (!f.recursive) parts.push("仅当前层");
@@ -206,7 +224,7 @@
       if (getFiles(fid).some((f) => f.path === path && (f.status === "pending" || f.status === "processing"))) return;
       if (isIgnored(path)) return;
 
-      const name = path.split("/").pop() || path.split("\\").pop() || path;
+      const name = getFileName(path);
       const ext = name.split(".").pop()?.toLowerCase() || "unknown";
       const fileId = crypto.randomUUID();
 
@@ -305,9 +323,7 @@
   }
 
   function getOutputPath(file: MediaFile, folder: WatchFolder | undefined): string {
-    const parts = file.path.split("/");
-    const fileName = parts.pop() || "";
-    const originalDir = parts.join("/");
+    const { dir: originalDir, name: fileName, sep } = splitPath(file.path);
     const dotIdx = fileName.lastIndexOf(".");
     const baseName = dotIdx > 0 ? fileName.substring(0, dotIdx) : fileName;
     const originalExt = dotIdx > 0 ? fileName.substring(dotIdx + 1) : "";
@@ -319,26 +335,28 @@
     }
 
     const outputMode = folder?.outputMode ?? "overwrite";
-    const outputDir = folder?.outputDir ?? "";
+    const mediaType = folder?.mediaType ?? "image";
+    const defaultDir = mediaType === "image" ? $appSettings.defaultImageOutputDir
+      : mediaType === "video" ? $appSettings.defaultVideoOutputDir
+      : $appSettings.defaultAudioOutputDir;
+    const outputDir = folder?.outputDir || defaultDir;
     const preserveStructure = folder?.preserveStructure ?? true;
 
     if (outputMode === "saveto" && outputDir) {
       if (preserveStructure && file.baseDir) {
         const relative = file.path.startsWith(file.baseDir)
-          ? file.path.slice(file.baseDir.length).replace(/^\//, "")
+          ? file.path.slice(file.baseDir.length).replace(/^[/\\]/, "")
           : fileName;
-        const relParts = relative.split("/");
-        const relName = relParts.pop() || "";
+        const { dir: relDir, name: relName } = splitPath(relative);
         const relDotIdx = relName.lastIndexOf(".");
         const relBase = relDotIdx > 0 ? relName.substring(0, relDotIdx) : relName;
-        const relDir = relParts.join("/");
-        const outDir = relDir ? `${outputDir}/${relDir}` : outputDir;
-        return `${outDir}/${relBase}.${ext}`;
+        const outDir = relDir ? joinPath([outputDir, relDir], sep) : outputDir;
+        return joinPath([outDir, `${relBase}.${ext}`], sep);
       }
-      return `${outputDir}/${baseName}.${ext}`;
+      return joinPath([outputDir, `${baseName}.${ext}`], sep);
     }
 
-    return `${originalDir}/${baseName}.${ext}`;
+    return joinPath([originalDir, `${baseName}.${ext}`], sep);
   }
 
   async function autoProcessFile(folderId: string, index: number) {
@@ -347,18 +365,21 @@
     if (!file || file.status !== "pending" || file.mediaType !== "image") return;
 
     const folder = $watchFolders.find((f) => f.id === folderId);
-    const preset = getPreset(folder?.preset ?? "lossless");
-
-    const isTarget = preset.targetSize !== null;
     const outputFormat = folder?.outputFormat ?? "original";
     const needsConvert = outputFormat !== "original";
+    const isPngOutput = outputFormat === "png";
+
+    // PNG output: lossless only, ignore preset
+    const preset = isPngOutput ? null : getPreset(folder?.preset ?? "lossless");
+
+    const isTarget = preset?.targetSize !== null && preset?.targetSize !== undefined;
 
     // Skip entirely if file already meets target size AND no format conversion needed
     if (isTarget && !needsConvert && file.originalSize > 0) {
-      const targetBytes = Math.round(preset.targetSize! * 1024 * 1024);
+      const targetBytes = Math.round(preset!.targetSize! * 1024 * 1024);
       if (file.originalSize <= targetBytes) {
         setFiles(folderId, files.map((f, i) =>
-          i === index ? { ...f, status: "skipped", processInfo: `已满足 ≤${preset.targetSize}MB`, processedAt: Date.now() } : f,
+          i === index ? { ...f, status: "skipped", processInfo: `已满足 ≤${preset!.targetSize}MB`, processedAt: Date.now() } : f,
         ));
         return;
       }
@@ -367,29 +388,50 @@
     setFiles(folderId, files.map((f, i) => (i === index ? { ...f, status: "processing" } : f)));
 
     try {
-      const isQuality = !isTarget && preset.quality < 100;
-      const targetBytes = isTarget ? Math.round(preset.targetSize! * 1024 * 1024) : null;
+      let compressEnabled: boolean;
+      let quality: number;
+      let targetBytes: number | null = null;
+      let resizeEnabled = false;
+      let resizeWidth: number | null = null;
 
-      // If target size mode and file already fits, only do format conversion (no compression)
-      const alreadyFits = isTarget && file.originalSize > 0 && targetBytes !== null && file.originalSize <= targetBytes;
-      const compressEnabled = alreadyFits ? false : (isQuality || isTarget);
+      if (isPngOutput) {
+        const pngMode = folder?.pngMode ?? "lossless";
+        if (pngMode === "off") {
+          compressEnabled = false;
+          quality = 100;
+        } else {
+          compressEnabled = true;
+          quality = pngMode === "lossy" ? (folder?.pngQuality ?? 80) : 100;
+        }
+      } else if (preset) {
+        const isQuality = !isTarget && preset.quality < 100;
+        targetBytes = isTarget ? Math.round(preset.targetSize! * 1024 * 1024) : null;
+        const alreadyFits = isTarget && file.originalSize > 0 && targetBytes !== null && file.originalSize <= targetBytes;
+        compressEnabled = alreadyFits ? false : (isQuality || isTarget);
+        quality = compressEnabled ? preset.quality : 100;
+        if (alreadyFits) targetBytes = null;
+        resizeEnabled = preset.resizeWidth !== null;
+        resizeWidth = preset.resizeWidth;
+      } else {
+        compressEnabled = false;
+        quality = 100;
+      }
 
       const outputPath = getOutputPath(file, folder);
-      // Pre-register output path to ignore watcher events during processing
       addIgnorePath(outputPath);
 
       const result: ProcessResult = await invoke("process_image", {
         filePath: file.path, outputPath,
         settings: {
           compress_enabled: compressEnabled,
-          quality: compressEnabled ? preset.quality : 100,
+          quality,
           convert_enabled: needsConvert,
           output_format: outputFormat,
-          resize_enabled: preset.resizeWidth !== null,
-          resize_width: preset.resizeWidth,
+          resize_enabled: resizeEnabled,
+          resize_width: resizeWidth,
           resize_height: null,
           keep_aspect_ratio: true,
-          target_size: compressEnabled ? targetBytes : null,
+          target_size: targetBytes,
         },
       });
 
@@ -401,13 +443,21 @@
 
       // Build process info description
       const infoParts: string[] = [];
-      if (isQuality) infoParts.push(`质量 ${preset.quality}%`);
-      else if (isTarget) infoParts.push(`目标 ≤${preset.targetSize}MB`);
-      else infoParts.push("无损");
-      if (preset.resizeWidth) infoParts.push(`缩放 ${preset.resizeWidth}px`);
+      if (isPngOutput) {
+        const pngMode = folder?.pngMode ?? "lossless";
+        if (pngMode === "off") infoParts.push("PNG 原图");
+        else if (pngMode === "lossy") infoParts.push(`PNG 有损 ${folder?.pngQuality ?? 80}%`);
+        else infoParts.push("PNG 无损");
+      } else if (preset) {
+        const isQuality = !isTarget && preset.quality < 100;
+        if (isQuality) infoParts.push(`质量 ${preset.quality}%`);
+        else if (isTarget) infoParts.push(`目标 ≤${preset.targetSize}MB`);
+        else infoParts.push("无损");
+        if (preset.resizeWidth) infoParts.push(`缩放 ${preset.resizeWidth}px`);
+      }
       if (outputFormat !== "original") infoParts.push(`→ ${outputFormat.toUpperCase()}`);
       if (folder?.outputMode === "overwrite") infoParts.push("覆盖");
-      else if (folder?.outputDir) infoParts.push(`→ ${folder.outputDir.split("/").pop()}`);
+      else if (folder?.outputDir) infoParts.push(`→ ${getFileName(folder.outputDir)}`);
       const processInfo = infoParts.join(" · ");
 
       const updated = getFiles(folderId);
@@ -509,7 +559,7 @@
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="dir-icon">
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
               </svg>
-              <span class="dir-name" title={folder.path}>{folder.path.split("/").pop() || folder.path}</span>
+              <span class="dir-name" title={folder.path}>{getFileName(folder.path) || folder.path}</span>
               {#if folderFileCount(folder.id) > 0}
                 <span class="file-count">{folderFileCount(folder.id)}</span>
               {/if}
@@ -585,7 +635,7 @@
           <div class="pop-row">
             <span class="pop-label">目录</span>
             <button class="path-btn" onclick={() => pickFolderOutputDir(folder.id)} title={folder.outputDir || "选择目录"}>
-              {folder.outputDir ? folder.outputDir.split("/").pop() : "选择目录..."}
+              {folder.outputDir ? getFileName(folder.outputDir) : defaultDirLabel(folder.mediaType)}
             </button>
             {#if folder.outputDir}
               <button class="icon-btn" title="清除" onclick={() => updateFolder(folder.id, { outputDir: "" })}>
@@ -618,19 +668,6 @@
 
         {#if folder.autoProcess && folder.mediaType === "image"}
           <div class="pop-row">
-            <span class="pop-label">预设</span>
-            <div class="preset-group">
-              {#each imagePresets as p}
-                <button
-                  class="preset-chip"
-                  class:active={folder.preset === p.id}
-                  onclick={() => updateFolder(folder.id, { preset: p.id })}
-                >{p.label}</button>
-              {/each}
-            </div>
-          </div>
-
-          <div class="pop-row">
             <span class="pop-label">格式</span>
             <SegmentControl
               options={formatOptions}
@@ -638,6 +675,41 @@
               onchange={(v) => updateFolder(folder.id, { outputFormat: v })}
             />
           </div>
+
+          {#if folder.outputFormat === "png"}
+            <div class="pop-row">
+              <span class="pop-label">压缩</span>
+              <SegmentControl
+                options={[
+                  { value: "off", label: "原图" },
+                  { value: "lossless", label: "无损" },
+                  { value: "lossy", label: "有损" },
+                ]}
+                selected={folder.pngMode}
+                onchange={(v) => updateFolder(folder.id, { pngMode: v as "off" | "lossless" | "lossy" })}
+              />
+              {#if folder.pngMode === "lossy"}
+                <input type="range" class="pop-slider" min="1" max="99"
+                  value={folder.pngQuality ?? 80}
+                  oninput={(e) => updateFolder(folder.id, { pngQuality: Number((e.target as HTMLInputElement).value) })}
+                />
+                <span class="pop-value">{folder.pngQuality ?? 80}%</span>
+              {/if}
+            </div>
+          {:else}
+            <div class="pop-row">
+              <span class="pop-label">预设</span>
+              <div class="preset-group">
+                {#each imagePresets as p}
+                  <button
+                    class="preset-chip"
+                    class:active={folder.preset === p.id}
+                    onclick={() => updateFolder(folder.id, { preset: p.id })}
+                  >{p.label}</button>
+                {/each}
+              </div>
+            </div>
+          {/if}
         {/if}
       </div>
     {/if}
@@ -920,6 +992,33 @@
     color: var(--color-text-muted);
     flex-shrink: 0;
     min-width: 28px;
+  }
+
+  .pop-slider {
+    width: 70px;
+    height: 3px;
+    appearance: none;
+    background: var(--color-bg-hover);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  .pop-slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    cursor: pointer;
+  }
+
+  .pop-value {
+    font-size: 11px;
+    color: var(--color-accent);
+    font-weight: 600;
+    min-width: 28px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
   }
 
   .ext-group {

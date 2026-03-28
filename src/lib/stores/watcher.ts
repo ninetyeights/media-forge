@@ -20,6 +20,10 @@ export interface WatchFolder {
   autoProcess: boolean;
   preset: string;
   outputFormat: string;
+  /** PNG compression mode */
+  pngMode: "off" | "lossless" | "lossy";
+  /** PNG lossy quality (0-100), used when pngMode is "lossy" */
+  pngQuality: number;
   outputDir: string;
   outputMode: "overwrite" | "saveto";
   preserveStructure: boolean;
@@ -36,6 +40,8 @@ export function createWatchFolder(path: string): WatchFolder {
     autoProcess: true,
     preset: "lossless",
     outputFormat: "original",
+    pngMode: "lossless",
+    pngQuality: 80,
     outputDir: "",
     outputMode: "saveto",
     preserveStructure: true,

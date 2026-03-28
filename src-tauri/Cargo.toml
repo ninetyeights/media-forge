@@ -36,6 +36,7 @@ notify-debouncer-mini = "0.5"
 tauri-plugin-store = "2.4.2"
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-autostart = "2.5.1"
+tauri-plugin-updater = "2.10.0"
 
 # Dev mode: optimize dependencies but not our code (fast compile + fast runtime)
 [profile.dev.package."*"]

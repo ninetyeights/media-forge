@@ -3,7 +3,7 @@ import { load } from "@tauri-apps/plugin-store";
 
 export interface ImageSettings {
   preset: string;
-  compressMode: "off" | "quality" | "target";
+  compressMode: "off" | "lossless" | "quality" | "target";
   quality: number;
   targetSize: number;
   outputFormat: string;
@@ -110,7 +110,9 @@ export interface AppSettings {
   concurrency: number;
   notificationsEnabled: boolean;
   autoStart: boolean;
-  defaultOutputDir: string;
+  defaultImageOutputDir: string;
+  defaultVideoOutputDir: string;
+  defaultAudioOutputDir: string;
 }
 
 const APP_DEFAULTS: AppSettings = {
@@ -118,7 +120,9 @@ const APP_DEFAULTS: AppSettings = {
   concurrency: 4,
   notificationsEnabled: true,
   autoStart: false,
-  defaultOutputDir: "",
+  defaultImageOutputDir: "",
+  defaultVideoOutputDir: "",
+  defaultAudioOutputDir: "",
 };
 
 export const appSettings = writable<AppSettings>(APP_DEFAULTS);

@@ -1,20 +1,27 @@
 <script lang="ts">
   import { appSettings } from "$lib/stores/settings";
   import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
+  import { check } from "@tauri-apps/plugin-updater";
+  import { relaunch } from "@tauri-apps/plugin-process";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { getVersion } from "@tauri-apps/api/app";
   import { onMount } from "svelte";
   import SegmentControl from "$lib/components/SegmentControl.svelte";
 
   let autoStartEnabled = $state(false);
+  let appVersion = $state("");
+  let updateStatus = $state<"idle" | "checking" | "available" | "downloading" | "ready" | "none" | "error">("idle");
+  let updateVersion = $state("");
+  let updateError = $state("");
 
   onMount(async () => {
     try {
       autoStartEnabled = await isEnabled();
-      // Sync store with actual system state
       if (autoStartEnabled !== $appSettings.autoStart) {
         appSettings.update((s) => ({ ...s, autoStart: autoStartEnabled }));
       }
     } catch (_) {}
+    try { appVersion = await getVersion(); } catch (_) {}
   });
 
   async function toggleAutoStart() {
@@ -30,10 +37,42 @@
     } catch (_) {}
   }
 
-  async function pickDefaultOutputDir() {
+  async function checkForUpdate() {
+    updateStatus = "checking";
+    updateError = "";
+    try {
+      const update = await check();
+      if (update) {
+        updateVersion = update.version;
+        updateStatus = "available";
+      } else {
+        updateStatus = "none";
+      }
+    } catch (e) {
+      updateError = String(e);
+      updateStatus = "error";
+    }
+  }
+
+  async function downloadAndInstall() {
+    updateStatus = "downloading";
+    try {
+      const update = await check();
+      if (update) {
+        await update.downloadAndInstall();
+        updateStatus = "ready";
+        await relaunch();
+      }
+    } catch (e) {
+      updateError = String(e);
+      updateStatus = "error";
+    }
+  }
+
+  async function pickOutputDir(key: "defaultImageOutputDir" | "defaultVideoOutputDir" | "defaultAudioOutputDir") {
     const dir = await open({ directory: true, multiple: false });
     if (dir && typeof dir === "string") {
-      appSettings.update((s) => ({ ...s, defaultOutputDir: dir }));
+      appSettings.update((s) => ({ ...s, [key]: dir }));
     }
   }
 </script>
@@ -73,22 +112,28 @@
       />
     </div>
 
-    <div class="setting-row">
-      <div class="setting-info">
-        <span class="setting-label">默认输出目录</span>
-        <span class="setting-desc">新建任务时的默认另存到目录</span>
-      </div>
-      <div class="setting-control">
-        <button class="path-btn" onclick={pickDefaultOutputDir} title={$appSettings.defaultOutputDir || "点击选择"}>
-          {$appSettings.defaultOutputDir ? $appSettings.defaultOutputDir.split("/").pop() : "未设置"}
-        </button>
-        {#if $appSettings.defaultOutputDir}
-          <button class="clear-btn" onclick={() => appSettings.update((s) => ({ ...s, defaultOutputDir: "" }))} title="清除">
-            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.2"/></svg>
+    {#each [
+      { key: "defaultImageOutputDir" as const, label: "图片默认输出目录" },
+      { key: "defaultVideoOutputDir" as const, label: "视频默认输出目录" },
+      { key: "defaultAudioOutputDir" as const, label: "音频默认输出目录" },
+    ] as item}
+      <div class="setting-row">
+        <div class="setting-info">
+          <span class="setting-label">{item.label}</span>
+          <span class="setting-desc">另存时未选择目录则使用此目录</span>
+        </div>
+        <div class="setting-control">
+          <button class="path-btn" onclick={() => pickOutputDir(item.key)} title={$appSettings[item.key] || "点击选择"}>
+            {$appSettings[item.key] ? $appSettings[item.key].split(/[/\\]/).pop() : "未设置"}
           </button>
-        {/if}
+          {#if $appSettings[item.key]}
+            <button class="clear-btn" onclick={() => appSettings.update((s) => ({ ...s, [item.key]: "" }))} title="清除">
+              <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.2"/></svg>
+            </button>
+          {/if}
+        </div>
       </div>
-    </div>
+    {/each}
   </div>
 
   <div class="settings-group">
@@ -116,6 +161,39 @@
         <span class="toggle-track"></span>
       </label>
     </div>
+  </div>
+
+  <div class="settings-group">
+    <span class="group-label">关于</span>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <span class="setting-label">版本</span>
+        <span class="setting-desc">Media Forge v{appVersion}</span>
+      </div>
+      <div class="setting-control">
+        {#if updateStatus === "idle" || updateStatus === "none" || updateStatus === "error"}
+          <button class="update-btn" onclick={checkForUpdate}>
+            {updateStatus === "none" ? "已是最新" : updateStatus === "error" ? "重试" : "检查更新"}
+          </button>
+        {:else if updateStatus === "checking"}
+          <span class="update-text">检查中...</span>
+        {:else if updateStatus === "available"}
+          <button class="update-btn update-btn-accent" onclick={downloadAndInstall}>
+            更新到 v{updateVersion}
+          </button>
+        {:else if updateStatus === "downloading"}
+          <span class="update-text">下载安装中...</span>
+        {:else if updateStatus === "ready"}
+          <span class="update-text">即将重启...</span>
+        {/if}
+      </div>
+    </div>
+    {#if updateError}
+      <div class="setting-row">
+        <span class="update-error">{updateError}</span>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -280,5 +358,36 @@
   .toggle input:checked + .toggle-track::after {
     left: 16px;
     background: var(--color-accent);
+  }
+
+  .update-btn {
+    padding: 4px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+    outline: none;
+  }
+  .update-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+  .update-btn-accent {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: var(--color-bg-primary);
+    font-weight: 600;
+  }
+  .update-btn-accent:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); }
+
+  .update-text {
+    font-size: 11px;
+    color: var(--color-text-muted);
+  }
+
+  .update-error {
+    font-size: 10px;
+    color: var(--color-error);
+    word-break: break-all;
   }
 </style>

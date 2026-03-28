@@ -227,15 +227,31 @@ fn encode_and_save(
             img.write_with_encoder(encoder).map_err(|e| e.to_string())
         }
         ImageFormat::Png => {
-            // First save with image crate, then optimize with oxipng (lossless)
-            img.save(output_path).map_err(|e| e.to_string())?;
-            let opts = oxipng::Options::from_preset(3);
-            oxipng::optimize(
-                &oxipng::InFile::Path(std::path::PathBuf::from(output_path)),
-                &oxipng::OutFile::from_path(std::path::PathBuf::from(output_path)),
-                &opts,
-            ).map_err(|e| e.to_string())?;
-            Ok(())
+            if quality < 100 {
+                // Lossy: imagequant color quantization then oxipng optimize
+                let rgba = img.to_rgba8();
+                let w = rgba.width() as usize;
+                let h = rgba.height() as usize;
+                let data = quantize_png(&rgba, w, h, quality)?;
+                std::fs::write(output_path, &data).map_err(|e| e.to_string())?;
+                let opts = oxipng::Options::from_preset(3);
+                oxipng::optimize(
+                    &oxipng::InFile::Path(std::path::PathBuf::from(output_path)),
+                    &oxipng::OutFile::from_path(std::path::PathBuf::from(output_path)),
+                    &opts,
+                ).map_err(|e| e.to_string())?;
+                Ok(())
+            } else {
+                // Lossless: save then oxipng optimize
+                img.save(output_path).map_err(|e| e.to_string())?;
+                let opts = oxipng::Options::from_preset(3);
+                oxipng::optimize(
+                    &oxipng::InFile::Path(std::path::PathBuf::from(output_path)),
+                    &oxipng::OutFile::from_path(std::path::PathBuf::from(output_path)),
+                    &opts,
+                ).map_err(|e| e.to_string())?;
+                Ok(())
+            }
         }
         _ => {
             img.save(output_path).map_err(|e| e.to_string())

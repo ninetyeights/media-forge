@@ -2,13 +2,14 @@
   import { invoke } from "@tauri-apps/api/core";
   import { open } from "@tauri-apps/plugin-dialog";
   import { imageFiles, isProcessing, removeFile, clearFiles, sendToWatermark } from "$lib/stores/fileQueue";
-  import { imageSettings, imagePresets, appSettings, type ImageSettings } from "$lib/stores/settings";
+  import { imageSettings, imagePresets, appSettings, type ImageSettings, type AppSettings } from "$lib/stores/settings";
   import { currentView } from "$lib/stores/navigation";
   import type { MediaFile, ImageInfo, ProcessResult, ScannedFile } from "$lib/types";
   import FileDropZone from "$lib/components/FileDropZone.svelte";
   import FileListItem from "$lib/components/FileListItem.svelte";
   import SegmentControl from "$lib/components/SegmentControl.svelte";
   import { formatSize } from "$lib/utils/fileSize";
+  import { splitPath, joinPath, fileName as getFileName, parentDir, splitSegments, pathSep, stripLeadingSep } from "$lib/utils/path";
 
   async function pickOutputDir() {
     const dir = await open({ directory: true, multiple: false });
@@ -18,7 +19,7 @@
   }
 
   const imageExts = ["jpg", "jpeg", "png", "webp", "avif", "gif", "bmp", "tiff"];
-  const losslessFormats = new Set(["png", "gif", "bmp", "tiff"]);
+  const losslessFormats = new Set(["gif", "bmp", "tiff"]);
   const formatOptions = [
     { value: "original", label: "原格式" },
     { value: "webp", label: "WEBP" },
@@ -77,7 +78,7 @@
       });
       if (exists) continue;
 
-      const name = path.split("/").pop() || path.split("\\").pop() || path;
+      const name = getFileName(path);
       try {
         const info: ImageInfo = await invoke("get_image_info", { path });
         const file: MediaFile = {
@@ -115,9 +116,7 @@
   }
 
   function getOutputPath(file: MediaFile, settings: ImageSettings): string {
-    const parts = file.path.split("/");
-    const fileName = parts.pop() || "";
-    const originalDir = parts.join("/");
+    const { dir: originalDir, name: fileName, sep } = splitPath(file.path);
     const dotIdx = fileName.lastIndexOf(".");
     const baseName = dotIdx > 0 ? fileName.substring(0, dotIdx) : fileName;
     const originalExt = dotIdx > 0 ? fileName.substring(dotIdx + 1) : "";
@@ -126,13 +125,10 @@
     let ext = originalExt;
 
     if (converting) {
-      // User chose a specific format → use jpegExtension for JPEG
       ext = settings.outputFormat;
       const lower = ext.toLowerCase();
       if (lower === "jpg" || lower === "jpeg") ext = settings.jpegExtension;
     } else if (settings.fixExtension && file.format) {
-      // Fix truly wrong extensions (e.g. .png file that's actually JPEG → .jpg)
-      // But .jpg and .jpeg are both valid for JPEG, don't change between them
       const validJpegExts = new Set(["jpg", "jpeg"]);
       const isOriginalValidJpeg = validJpegExts.has(originalExt.toLowerCase()) && file.format === "jpg";
       if (!isOriginalValidJpeg) {
@@ -140,28 +136,24 @@
       }
     }
 
-    // Normalize tif → tiff
     if (ext.toLowerCase() === "tif") ext = "tiff";
 
-    if (settings.outputMode === "saveto" && settings.outputDir) {
+    const outputDir = settings.outputDir || $appSettings.defaultImageOutputDir;
+    if (settings.outputMode === "saveto" && outputDir) {
       if (settings.preserveStructure && file.baseDir) {
         const relative = file.path.startsWith(file.baseDir)
-          ? file.path.slice(file.baseDir.length).replace(/^\//, "")
+          ? file.path.slice(file.baseDir.length).replace(/^[/\\]/, "")
           : fileName;
-        const relParts = relative.split("/");
-        const relName = relParts.pop() || "";
+        const { dir: relDir, name: relName } = splitPath(relative);
         const relDotIdx = relName.lastIndexOf(".");
         const relBase = relDotIdx > 0 ? relName.substring(0, relDotIdx) : relName;
-        const relDir = relParts.join("/");
-        const outDir = relDir ? `${settings.outputDir}/${relDir}` : settings.outputDir;
-        return `${outDir}/${relBase}.${ext}`;
+        const outDir = relDir ? joinPath([outputDir, relDir], sep) : outputDir;
+        return joinPath([outDir, `${relBase}.${ext}`], sep);
       }
-      return `${settings.outputDir}/${baseName}.${ext}`;
+      return joinPath([outputDir, `${baseName}.${ext}`], sep);
     }
 
-    // Overwrite mode: if format changed, extension changes → can't truly overwrite
-    // Output new file alongside original, original stays untouched
-    return `${originalDir}/${baseName}.${ext}`;
+    return joinPath([originalDir, `${baseName}.${ext}`], sep);
   }
 
   function shouldSkip(file: MediaFile, settings: ImageSettings): boolean {
@@ -192,6 +184,7 @@
 
     try {
       const outputPath = getOutputPath(file, settings);
+      const isLossless = settings.compressMode === "lossless";
       const isQuality = settings.compressMode === "quality";
       const isTarget = settings.compressMode === "target";
       const targetBytes = isTarget ? Math.round(settings.targetSize * 1024 * 1024) : null;
@@ -231,8 +224,8 @@
         filePath: file.path,
         outputPath,
         settings: {
-          compress_enabled: isQuality || isTarget,
-          quality: isQuality ? settings.quality : 80,
+          compress_enabled: isLossless || isQuality || isTarget,
+          quality: isQuality ? settings.quality : (isLossless ? 100 : 80),
           convert_enabled: settings.outputFormat !== "original",
           output_format: settings.outputFormat,
           resize_enabled: settings.resizeWidth !== null || settings.resizeHeight !== null,
@@ -364,7 +357,7 @@
   let expandTimer: ReturnType<typeof setTimeout> | null = null;
 
   function expandFileParents(filePath: string) {
-    const fileDir = filePath.substring(0, filePath.lastIndexOf("/"));
+    const fileDir = parentDir(filePath);
     pendingExpands.add(fileDir);
     if (expandTimer) clearTimeout(expandTimer);
     expandTimer = setTimeout(flushExpands, 100);
@@ -414,7 +407,7 @@
     // Separate: individual files (baseDir === file parent) vs folder files
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
-      const fileParent = f.path.substring(0, f.path.lastIndexOf("/"));
+      const fileParent = parentDir(f.path);
       if (!f.baseDir || f.baseDir === fileParent) {
         rootFiles.push({ file: f, index: i });
       } else {
@@ -426,13 +419,13 @@
     // 1. rootFiles themselves come from multiple directories, OR
     // 2. rootFiles' directory differs from folderFiles' directories (different tree)
     if (rootFiles.length > 0) {
-      const rootDirs = new Set(rootFiles.map((e) => e.file.path.substring(0, e.file.path.lastIndexOf("/"))));
+      const rootDirs = new Set(rootFiles.map((e) => parentDir(e.file.path)));
       let shouldMerge = rootDirs.size > 1;
 
       if (!shouldMerge && folderFileEntries.length > 0) {
         // Check if rootFiles share a common ancestor with folderFiles
         const rootDir = [...rootDirs][0];
-        const folderDirs = folderFileEntries.map((e) => e.file.path.substring(0, e.file.path.lastIndexOf("/")));
+        const folderDirs = folderFileEntries.map((e) => parentDir(e.file.path));
         const anyShared = folderDirs.some((fd) => fd.startsWith(rootDir + "/") || rootDir.startsWith(fd + "/") || fd === rootDir);
         if (!anyShared) shouldMerge = true;
       }
@@ -448,31 +441,33 @@
     }
 
     // Find common root: longest common directory prefix among folder files
-    const allDirs = folderFileEntries.map((e) => e.file.path.substring(0, e.file.path.lastIndexOf("/")));
+    const allDirs = folderFileEntries.map((e) => parentDir(e.file.path));
+    const sep = pathSep(allDirs[0] || "/");
     let commonRoot = allDirs[0] || "";
     for (let i = 1; i < allDirs.length; i++) {
-      while (commonRoot && !allDirs[i].startsWith(commonRoot + "/") && allDirs[i] !== commonRoot) {
-        commonRoot = commonRoot.substring(0, commonRoot.lastIndexOf("/"));
+      while (commonRoot && !allDirs[i].startsWith(commonRoot + sep) && allDirs[i] !== commonRoot) {
+        const idx = Math.max(commonRoot.lastIndexOf("/"), commonRoot.lastIndexOf("\\"));
+        if (idx <= 0) { commonRoot = ""; break; }
+        commonRoot = commonRoot.substring(0, idx);
       }
     }
     // Count distinct first-level children under commonRoot
     const childNames = new Set<string>();
     for (const d of allDirs) {
-      const rel = d === commonRoot ? "" : d.slice(commonRoot.length + 1);
-      const first = rel.split("/")[0];
+      const rel = d === commonRoot ? "" : stripLeadingSep(d.slice(commonRoot.length));
+      const first = splitSegments(rel)[0];
       if (first) childNames.add(first);
     }
-    // Only go up one level if there's a single child folder (show that folder as root)
-    // Multiple children → keep commonRoot so they display as siblings
+    // Only go up one level if there's a single child folder
     if (childNames.size <= 1) {
-      const lastSlash = commonRoot.lastIndexOf("/");
-      if (lastSlash > 0) commonRoot = commonRoot.substring(0, lastSlash);
+      const idx = Math.max(commonRoot.lastIndexOf("/"), commonRoot.lastIndexOf("\\"));
+      if (idx > 0) commonRoot = commonRoot.substring(0, idx);
     }
 
     // Group folder files by directory
     const dirMap = new Map<string, { file: MediaFile; index: number }[]>();
     for (const entry of folderFileEntries) {
-      const fileDir = entry.file.path.substring(0, entry.file.path.lastIndexOf("/"));
+      const fileDir = parentDir(entry.file.path);
       if (!dirMap.has(fileDir)) dirMap.set(fileDir, []);
       dirMap.get(fileDir)!.push(entry);
     }
@@ -483,16 +478,16 @@
 
     for (const fullDir of [...dirMap.keys()].sort()) {
       const rel = fullDir.startsWith(commonRoot)
-        ? fullDir.slice(commonRoot.length).replace(/^\//, "")
+        ? stripLeadingSep(fullDir.slice(commonRoot.length))
         : fullDir;
-      const segments = rel ? rel.split("/") : [];
+      const segments = rel ? splitSegments(rel) : [];
       if (segments.length === 0) continue;
 
       let currentPath = commonRoot;
       let parentChildren = tree;
 
       for (let d = 0; d < segments.length; d++) {
-        currentPath = currentPath ? `${currentPath}/${segments[d]}` : segments[d];
+        currentPath = currentPath ? `${currentPath}${sep}${segments[d]}` : segments[d];
         let node = nodeMap.get(currentPath);
         if (!node) {
           node = { name: segments[d], fullPath: currentPath, depth: d, files: [], children: [], totalFiles: 0 };
@@ -599,17 +594,34 @@
         <SegmentControl
           options={formatOptions}
           selected={$imageSettings.outputFormat}
-          onchange={(v) => imageSettings.update((s) => ({ ...s, outputFormat: v }))}
+          onchange={(v) => imageSettings.update((s) => {
+            let mode = s.compressMode;
+            if (v === "png") {
+              // PNG doesn't support target size; map quality→quality (lossy), off→off
+              if (mode === "target") mode = "off";
+            } else {
+              // Non-PNG doesn't support lossless mode
+              if (mode === "lossless") mode = "off";
+            }
+            return { ...s, outputFormat: v, compressMode: mode };
+          })}
         />
         <div class="toolbar-sep"></div>
         <SegmentControl
-          options={[
-            { value: "off", label: "原图质量" },
-            { value: "quality", label: "按质量" },
-            { value: "target", label: "按大小" },
-          ]}
-          selected={$imageSettings.compressMode}
-          onchange={(v) => imageSettings.update((s) => ({ ...s, compressMode: v as "off" | "quality" | "target" }))}
+          options={$imageSettings.outputFormat === "png"
+            ? [
+                { value: "off", label: "原图" },
+                { value: "lossless", label: "无损" },
+                { value: "quality", label: "有损" },
+              ]
+            : [
+                { value: "off", label: "原图质量" },
+                { value: "quality", label: "按质量" },
+                { value: "target", label: "按大小" },
+              ]
+          }
+          selected={$imageSettings.outputFormat === "png" && ($imageSettings.compressMode === "target") ? "off" : $imageSettings.compressMode}
+          onchange={(v) => imageSettings.update((s) => ({ ...s, compressMode: v as "off" | "quality" | "target" | "lossless" }))}
         />
         {#if $imageSettings.compressMode === "quality" && !losslessFormats.has($imageSettings.outputFormat)}
           <input type="range" class="slider" min="1" max="99"
@@ -689,7 +701,7 @@
         />
         {#if $imageSettings.outputMode === "saveto"}
           <button class="path-btn" onclick={pickOutputDir} title={$imageSettings.outputDir || "点击选择目录"}>
-            {$imageSettings.outputDir ? $imageSettings.outputDir.split("/").pop() : "选择目录..."}
+            {$imageSettings.outputDir ? getFileName($imageSettings.outputDir) : $appSettings.defaultImageOutputDir ? `默认: ${getFileName($appSettings.defaultImageOutputDir)}` : "选择目录..."}
           </button>
           {#if $imageSettings.outputDir}
             <button class="icon-btn" title="清除"
