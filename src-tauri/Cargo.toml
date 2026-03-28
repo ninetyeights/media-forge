@@ -1,0 +1,50 @@
+[package]
+name = "tauri-app"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "tauri_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
+window-vibrancy = "0.6"
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = "0.25"
+webp = "0.3"
+tokio = { version = "1", features = ["rt", "sync"] }
+turbojpeg = "1.4.0"
+oxipng = "10.1.0"
+imagequant = "4.4.1"
+notify = { version = "7", features = ["macos_fsevent"] }
+notify-debouncer-mini = "0.5"
+tauri-plugin-store = "2.4.2"
+tauri-plugin-notification = "2.3.3"
+tauri-plugin-autostart = "2.5.1"
+
+# Dev mode: optimize dependencies but not our code (fast compile + fast runtime)
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "s"
+panic = "abort"
+
