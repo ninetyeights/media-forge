@@ -3,7 +3,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { open } from "@tauri-apps/plugin-dialog";
   import { onMount, onDestroy } from "svelte";
-  import { imageFiles, isProcessing, removeFile, clearFiles, sendToWatermark } from "$lib/stores/fileQueue";
+  import { imageFiles, isProcessing, removeFile, clearFiles, sendToWatermark, imageSelectedIds } from "$lib/stores/fileQueue";
   import { imageSettings, imagePresets, appSettings, type ImageSettings, type AppSettings } from "$lib/stores/settings";
   import { currentView } from "$lib/stores/navigation";
   import type { MediaFile, ImageInfo, ProcessResult, ScannedFile } from "$lib/types";
@@ -122,8 +122,7 @@
           mediaType: "image",
         };
         imageFiles.update((files) => [...files, file]);
-        selectedIds.add(file.id);
-        selectedIds = new Set(selectedIds);
+        imageSelectedIds.update((s) => new Set([...s, file.id]));
         expandFileParents(path);
       } catch (e) {
         const ext = name.split(".").pop()?.toLowerCase() || "unknown";
@@ -379,21 +378,26 @@
     currentView.set("watermark");
   }
 
-  // Selection state
-  let selectedIds = $state(new Set<string>());
+  // Selection state (persisted in store across view switches)
+  let selectedIds = $derived($imageSelectedIds);
 
   function toggleFileSelect(id: string) {
-    if (selectedIds.has(id)) selectedIds.delete(id);
-    else selectedIds.add(id);
-    selectedIds = new Set(selectedIds);
+    imageSelectedIds.update((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   }
 
   function toggleFolderSelect(node: TreeNode) {
     const ids = collectNodeFileIds(node);
-    const allSelected = ids.every((id) => selectedIds.has(id));
-    if (allSelected) ids.forEach((id) => selectedIds.delete(id));
-    else ids.forEach((id) => selectedIds.add(id));
-    selectedIds = new Set(selectedIds);
+    imageSelectedIds.update((s) => {
+      const next = new Set(s);
+      const allSelected = ids.every((id) => next.has(id));
+      if (allSelected) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
+      return next;
+    });
   }
 
   function collectNodeFileIds(node: TreeNode): string[] {
@@ -413,8 +417,8 @@
 
   function selectAll() {
     const all = $imageFiles.map((f) => f.id);
-    if (all.every((id) => selectedIds.has(id))) selectedIds = new Set();
-    else selectedIds = new Set(all);
+    if (all.every((id) => selectedIds.has(id))) imageSelectedIds.set(new Set());
+    else imageSelectedIds.set(new Set(all));
   }
 
   // Expanded folder paths
@@ -643,7 +647,6 @@
               onToggleSelect={() => toggleFileSelect(file.id)}
               onRemove={() => removeFile(imageFiles, index)}
               onReset={() => resetFile(index)}
-              onWatermark={file.status === "done" ? () => handleWatermark(file) : undefined}
             />
           </div>
         {/if}
@@ -746,7 +749,7 @@
           {/if}
         </span>
       </div>
-      <button class="btn-text-danger" onclick={() => clearFiles(imageFiles)}>清空</button>
+      <button class="btn-text-danger" onclick={() => { clearFiles(imageFiles); imageSelectedIds.set(new Set()); }}>清空</button>
     </div>
 
     <!-- Row 2: size + filter + options -->

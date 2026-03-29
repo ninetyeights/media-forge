@@ -7,6 +7,7 @@ export const audioFiles = writable<MediaFile[]>([]);
 export const watermarkFiles = writable<MediaFile[]>([]);
 
 export const isProcessing = writable(false);
+export const imageSelectedIds = writable<Set<string>>(new Set());
 
 export function sendToWatermark(file: MediaFile) {
   watermarkFiles.update((q) => [...q, { ...file, status: "pending" }]);
