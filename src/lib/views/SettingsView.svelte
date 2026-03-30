@@ -221,7 +221,7 @@
     document.removeEventListener("paste", handlePaste);
   }
 
-  async function pickOutputDir(key: "defaultImageOutputDir" | "defaultVideoOutputDir" | "defaultAudioOutputDir") {
+  async function pickOutputDir(key: "defaultImageOutputDir") {
     const dir = await open({ directory: true, multiple: false });
     if (dir && typeof dir === "string") {
       appSettings.update((s) => ({ ...s, [key]: dir }));
@@ -289,8 +289,6 @@
 
     {#each [
       { key: "defaultImageOutputDir" as const, label: "图片" },
-      { key: "defaultVideoOutputDir" as const, label: "视频" },
-      { key: "defaultAudioOutputDir" as const, label: "音频" },
     ] as item}
       <div class="setting-row">
         <div class="setting-info">

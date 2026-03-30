@@ -64,6 +64,7 @@ pub fn process_image(
             original_size,
             compressed_size: original_size,
             ratio: 0.0,
+            elapsed_ms: total_start.elapsed().as_millis() as u64,
         });
     }
 
@@ -126,6 +127,7 @@ pub fn process_image(
         original_size,
         compressed_size,
         ratio,
+        elapsed_ms: total_start.elapsed().as_millis() as u64,
     })
 }
 

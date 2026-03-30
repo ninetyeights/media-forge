@@ -3,7 +3,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { open } from "@tauri-apps/plugin-dialog";
   import { onMount, onDestroy } from "svelte";
-  import { imageFiles, isProcessing, removeFile, clearFiles, sendToWatermark, imageSelectedIds } from "$lib/stores/fileQueue";
+  import { imageFiles, isProcessing, removeFile, clearFiles, imageSelectedIds, imageBatchElapsed } from "$lib/stores/fileQueue";
   import { imageSettings, imagePresets, appSettings, type ImageSettings, type AppSettings } from "$lib/stores/settings";
   import { currentView } from "$lib/stores/navigation";
   import type { MediaFile, ImageInfo, ProcessResult, ScannedFile } from "$lib/types";
@@ -32,6 +32,7 @@
         );
       },
     );
+
   });
 
   onDestroy(() => {
@@ -320,6 +321,7 @@
           compressedSize: result.compressed_size,
           ratio: result.ratio,
           outputPath: result.output_path,
+          elapsedMs: result.elapsed_ms,
           error: missedTarget ? `PNG 无损压缩无法达到 ≤${settings.targetSize}MB` : undefined,
         };
         return [...f];
@@ -336,6 +338,7 @@
     const settings = structuredClone($imageSettings);
     processing = true;
     isProcessing.set(true);
+    const startTime = Date.now();
 
     const files = $imageFiles;
     const pending: number[] = [];
@@ -358,6 +361,7 @@
     const workers = Array.from({ length: Math.min(CONCURRENCY, pending.length) }, () => next());
     await Promise.all(workers);
 
+    imageBatchElapsed.set(Date.now() - startTime);
     processing = false;
     isProcessing.set(false);
   }
@@ -372,11 +376,6 @@
     });
   }
 
-  function handleWatermark(file: MediaFile) {
-    const processed = { ...file, path: file.outputPath || file.path };
-    sendToWatermark(processed);
-    currentView.set("watermark");
-  }
 
   // Selection state (persisted in store across view switches)
   let selectedIds = $derived($imageSelectedIds);
@@ -609,6 +608,12 @@
     }
     return acc;
   }, 0));
+  let batchElapsed = $derived($imageBatchElapsed);
+
+  function formatElapsed(ms: number): string {
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(1)}s`;
+  }
 </script>
 
 {#snippet renderTree(nodes: TreeNode[])}
@@ -749,7 +754,7 @@
           {/if}
         </span>
       </div>
-      <button class="btn-text-danger" onclick={() => { clearFiles(imageFiles); imageSelectedIds.set(new Set()); }}>清空</button>
+      <button class="btn-text-danger" onclick={() => { clearFiles(imageFiles); imageSelectedIds.set(new Set()); imageBatchElapsed.set(0); }}>清空</button>
     </div>
 
     <!-- Row 2: size + filter + options -->
@@ -899,7 +904,6 @@
             onToggleSelect={() => toggleFileSelect(file.id)}
             onRemove={() => removeFile(imageFiles, index)}
             onReset={() => resetFile(index)}
-            onWatermark={file.status === "done" ? () => handleWatermark(file) : undefined}
           />
         {/if}
       {/each}
@@ -914,6 +918,7 @@
         {#if doneCount > 0} · {doneCount} 已完成{/if}
         {#if skippedCount > 0} · {skippedCount} 已跳过{/if}
         {#if totalSaved > 0} · 节省 {formatSize(totalSaved)}{/if}
+        {#if batchElapsed > 0} · 耗时 {formatElapsed(batchElapsed)}{/if}
       </span>
       <button class="btn-primary" onclick={startProcess}
         disabled={processing || actionableCount === 0}>

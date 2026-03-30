@@ -77,6 +77,10 @@
     {/if}
   </span>
 
+  {#if file.elapsedMs !== undefined && file.status === "done"}
+    <span class="file-elapsed">{file.elapsedMs}ms</span>
+  {/if}
+
   <span class="file-status">
     {#if file.status === "pending"}
       <span class="badge pending">等待中</span>
@@ -262,6 +266,15 @@
   .ratio { font-size: 10px; font-weight: 600; }
   .ratio.saved { color: var(--color-success); }
   .ratio.grew { color: var(--color-warning); }
+
+  .file-elapsed {
+    font-size: 10px;
+    color: var(--color-text-muted);
+    opacity: 0.6;
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
 
   .file-status { flex-shrink: 0; }
 

@@ -14,4 +14,5 @@ pub struct ProcessResult {
     pub original_size: u64,
     pub compressed_size: u64,
     pub ratio: f64,
+    pub elapsed_ms: u64,
 }

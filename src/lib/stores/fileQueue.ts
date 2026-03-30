@@ -1,17 +1,11 @@
-import { writable, derived } from "svelte/store";
+import { writable } from "svelte/store";
 import type { MediaFile } from "$lib/types";
 
 export const imageFiles = writable<MediaFile[]>([]);
-export const videoFiles = writable<MediaFile[]>([]);
-export const audioFiles = writable<MediaFile[]>([]);
-export const watermarkFiles = writable<MediaFile[]>([]);
 
 export const isProcessing = writable(false);
 export const imageSelectedIds = writable<Set<string>>(new Set());
-
-export function sendToWatermark(file: MediaFile) {
-  watermarkFiles.update((q) => [...q, { ...file, status: "pending" }]);
-}
+export const imageBatchElapsed = writable(0);
 
 export function removeFile(
   store: typeof imageFiles,

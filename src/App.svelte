@@ -4,9 +4,6 @@
   import TitleBar from "$lib/components/TitleBar.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import ImageView from "$lib/views/ImageView.svelte";
-  import VideoView from "$lib/views/VideoView.svelte";
-  import AudioView from "$lib/views/AudioView.svelte";
-  import WatermarkView from "$lib/views/WatermarkView.svelte";
   import WatcherView from "$lib/views/WatcherView.svelte";
   import SettingsView from "$lib/views/SettingsView.svelte";
 </script>
@@ -18,12 +15,6 @@
     <main class="main-content">
       {#if $currentView === "image"}
         <ImageView />
-      {:else if $currentView === "video"}
-        <VideoView />
-      {:else if $currentView === "audio"}
-        <AudioView />
-      {:else if $currentView === "watermark"}
-        <WatermarkView />
       {:else if $currentView === "watcher"}
         <WatcherView />
       {:else if $currentView === "settings"}

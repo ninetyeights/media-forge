@@ -34,9 +34,7 @@
   }
 
   function defaultDirForType(mt: string): string {
-    if (mt === "image") return $appSettings.defaultImageOutputDir;
-    if (mt === "video") return $appSettings.defaultVideoOutputDir;
-    return $appSettings.defaultAudioOutputDir;
+    return $appSettings.defaultImageOutputDir;
   }
 
   function defaultDirLabel(mt: string): string {
@@ -335,9 +333,7 @@
 
     const outputMode = folder?.outputMode ?? "overwrite";
     const mediaType = folder?.mediaType ?? "image";
-    const defaultDir = mediaType === "image" ? $appSettings.defaultImageOutputDir
-      : mediaType === "video" ? $appSettings.defaultVideoOutputDir
-      : $appSettings.defaultAudioOutputDir;
+    const defaultDir = $appSettings.defaultImageOutputDir;
     const outputDir = folder?.outputDir || defaultDir;
     const preserveStructure = folder?.preserveStructure ?? true;
 
@@ -474,13 +470,23 @@
   async function processAllPending() {
     if (!selectedFolderId) return;
     processing = true;
-    const files = getFiles(selectedFolderId);
+    const fid = selectedFolderId;
+    const files = getFiles(fid);
     const pending = files
       .map((f, i) => ({ f, i }))
       .filter(({ f }) => f.status === "pending" && f.mediaType === "image");
-    for (const { i } of pending) {
-      await autoProcessFile(selectedFolderId!, i);
+
+    const concurrency = $appSettings.concurrency || 4;
+    let cursor = 0;
+    async function next(): Promise<void> {
+      while (cursor < pending.length) {
+        const { i } = pending[cursor++];
+        await autoProcessFile(fid!, i);
+      }
     }
+    const workers = Array.from({ length: Math.min(concurrency, pending.length) }, () => next());
+    await Promise.all(workers);
+
     processing = false;
   }
 

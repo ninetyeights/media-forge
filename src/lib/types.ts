@@ -19,6 +19,8 @@ export interface MediaFile {
   processInfo?: string;
   /** Timestamp when processing completed (or failed/skipped) */
   processedAt?: number;
+  /** Processing duration in milliseconds */
+  elapsedMs?: number;
 }
 
 export interface ScannedFile {
@@ -38,4 +40,5 @@ export interface ProcessResult {
   original_size: number;
   compressed_size: number;
   ratio: number;
+  elapsed_ms: number;
 }

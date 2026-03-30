@@ -41,29 +41,6 @@ export const imagePresets: ImagePreset[] = [
   { id: "web",        label: "Web优化",   quality: 80,  resizeWidth: 1920, targetSize: null },
 ];
 
-export interface VideoSettings {
-  compressEnabled: boolean;
-  crf: number;
-  codec: string;
-  convertEnabled: boolean;
-  outputFormat: string;
-  resizeEnabled: boolean;
-  resolution: string;
-  customWidth: number | null;
-  customHeight: number | null;
-  outputDir: string;
-}
-
-export interface AudioSettings {
-  compressEnabled: boolean;
-  bitrate: string;
-  convertEnabled: boolean;
-  outputFormat: string;
-  sampleRateEnabled: boolean;
-  sampleRate: string;
-  outputDir: string;
-}
-
 const IMAGE_DEFAULTS: ImageSettings = {
   preset: "lossless",
   compressMode: "off",
@@ -86,37 +63,12 @@ const IMAGE_DEFAULTS: ImageSettings = {
   stripExif: false,
 };
 
-const VIDEO_DEFAULTS: VideoSettings = {
-  compressEnabled: true,
-  crf: 23,
-  codec: "h264",
-  convertEnabled: false,
-  outputFormat: "mp4",
-  resizeEnabled: false,
-  resolution: "original",
-  customWidth: null,
-  customHeight: null,
-  outputDir: "",
-};
-
-const AUDIO_DEFAULTS: AudioSettings = {
-  compressEnabled: true,
-  bitrate: "192",
-  convertEnabled: false,
-  outputFormat: "mp3",
-  sampleRateEnabled: false,
-  sampleRate: "44100",
-  outputDir: "",
-};
-
 export interface AppSettings {
   sizeBase: 1024 | 1000;
   concurrency: number;
   notificationsEnabled: boolean;
   autoStart: boolean;
   defaultImageOutputDir: string;
-  defaultVideoOutputDir: string;
-  defaultAudioOutputDir: string;
   uiScale: number;
 }
 
@@ -126,15 +78,11 @@ const APP_DEFAULTS: AppSettings = {
   notificationsEnabled: false,
   autoStart: false,
   defaultImageOutputDir: "",
-  defaultVideoOutputDir: "",
-  defaultAudioOutputDir: "",
   uiScale: 100,
 };
 
 export const appSettings = writable<AppSettings>(APP_DEFAULTS);
 export const imageSettings = writable<ImageSettings>(IMAGE_DEFAULTS);
-export const videoSettings = writable<VideoSettings>(VIDEO_DEFAULTS);
-export const audioSettings = writable<AudioSettings>(AUDIO_DEFAULTS);
 
 // --- Persistence ---
 
@@ -148,18 +96,12 @@ export async function loadSettings(): Promise<void> {
     if (app) appSettings.set({ ...APP_DEFAULTS, ...app });
     const img = await store.get<ImageSettings>("image");
     if (img) imageSettings.set({ ...IMAGE_DEFAULTS, ...img });
-    const vid = await store.get<VideoSettings>("video");
-    if (vid) videoSettings.set({ ...VIDEO_DEFAULTS, ...vid });
-    const aud = await store.get<AudioSettings>("audio");
-    if (aud) audioSettings.set({ ...AUDIO_DEFAULTS, ...aud });
   } catch (_) {}
 
   storeReady = true;
 
   appSettings.subscribe((v) => { if (storeReady) saveKey("app", v); });
   imageSettings.subscribe((v) => { if (storeReady) saveKey("image", v); });
-  videoSettings.subscribe((v) => { if (storeReady) saveKey("video", v); });
-  audioSettings.subscribe((v) => { if (storeReady) saveKey("audio", v); });
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;

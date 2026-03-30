@@ -4,9 +4,6 @@
 
   const mainItems: { id: ViewName; label: string; icon: string }[] = [
     { id: "image", label: "图片", icon: "image" },
-    // { id: "video", label: "视频", icon: "video" },
-    // { id: "audio", label: "音频", icon: "audio" },
-    // { id: "watermark", label: "水印", icon: "watermark" },
   ];
 
   const bottomItems: { id: ViewName; label: string; icon: string }[] = [
