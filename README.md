@@ -71,6 +71,58 @@ pnpm install
 pnpm tauri dev
 ```
 
+## 📦 发布新版本
+
+### 1. 确保代码已提交并推送
+
+```bash
+git add -A
+git commit -m "你的更新说明"
+git push
+```
+
+### 2. 创建版本 Tag
+
+版本号格式为 `v主版本.次版本.修订版本`，例如 `v1.0.0`：
+
+| 版本类型 | 示例 | 说明 |
+|---------|------|------|
+| `vX.0.0` | v2.0.0 | 重大更新，不兼容旧版本 |
+| `vX.Y.0` | v1.1.0 | 新增功能 |
+| `vX.Y.Z` | v1.0.1 | Bug 修复 |
+
+```bash
+# 创建 Tag（替换版本号）
+git tag -a v1.0.0 -m "Release version 1.0.0"
+
+# 推送 Tag 到 GitHub（这会自动触发 CI 构建）
+git push origin v1.0.0
+```
+
+### 3. 查看构建状态
+
+- 构建进度：[Actions 页面](https://github.com/secure-artifacts/media-forge/actions)
+- 发布产物：[Releases 页面](https://github.com/secure-artifacts/media-forge/releases)
+
+### 4. 构建失败怎么办
+
+如果 CI 构建失败，修复问题后需要删除旧 Tag 重新创建：
+
+```bash
+# 删除本地和远程的旧 Tag
+git tag -d v1.0.0
+git push origin :refs/tags/v1.0.0
+
+# 修复代码后重新提交
+git add -A
+git commit -m "修复构建问题"
+git push
+
+# 重新创建并推送 Tag
+git tag -a v1.0.0 -m "Release version 1.0.0"
+git push origin v1.0.0
+```
+
 ## 📄 许可证
 
 GPL-3.0
