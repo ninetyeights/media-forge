@@ -6,7 +6,9 @@ on:
       - 'v*'
 
 permissions:
+  id-token: write
   contents: write
+  attestations: write
 
 jobs:
   build:
@@ -91,3 +93,12 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*-setup.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
